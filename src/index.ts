@@ -1,11 +1,12 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode } from "./types";
 import { registerSettings, getSettings } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep } from "./adapter";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree } from "./adapter";
 import { render, hitTest } from "./renderer";
 import { createState, fitToView, zoomIn, zoomOut, attachHandlers } from "./controller";
-import { buildUI, STYLES, setActiveView, applyThemeToUI } from "./ui";
+import { buildUI, STYLES, setActiveView, applyThemeToUI, updateDockButton } from "./ui";
 import { setTheme } from "./colors";
+import { renderToDataURL } from "./offscreen";
 import { layoutTreeChart } from "./views/tree-chart";
 import { layoutTreeTable } from "./views/tree-table";
 import { layoutRoadmapAlt, layoutRoadmapLinear } from "./views/roadmap";
@@ -34,6 +35,7 @@ let ctx: CanvasRenderingContext2D | null = null;
 let controllerState = createState();
 let cleanupController: (() => void) | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+let isDocked = true; // default to docked mode
 
 function getCanvasSize(): { w: number; h: number } {
   if (!canvas) return { w: 800, h: 600 };
@@ -55,7 +57,6 @@ function rebuildLayout(): void {
   const result = view.layout(tree, settings.maxDepth);
   currentElements = result.elements;
 
-  // Auto fit-to-view
   const { w, h } = getCanvasSize();
   controllerState.transform = fitToView(result.bounds, w, h);
   redraw();
@@ -91,13 +92,50 @@ function switchView(viewId: ViewId): void {
   }
 }
 
+// --- Dock / Full-screen mode ---
+
+function applyDockMode(): void {
+  if (isDocked) {
+    logseq.setMainUIInlineStyle({
+      position: "fixed",
+      zIndex: "999",
+      top: "0",
+      right: "0",
+      left: "auto",
+      width: "42%",
+      height: "100vh",
+      borderLeft: "1px solid var(--ls-border-color, #333)",
+    });
+  } else {
+    logseq.setMainUIInlineStyle({
+      position: "fixed",
+      zIndex: "999",
+      top: "0",
+      left: "0",
+      right: "auto",
+      width: "100vw",
+      height: "100vh",
+      borderLeft: "none",
+    });
+  }
+  updateDockButton(isDocked);
+  // Recalculate layout after resize
+  setTimeout(() => {
+    if (currentTree) rebuildLayout();
+  }, 50);
+}
+
+function toggleDockMode(): void {
+  isDocked = !isDocked;
+  applyDockMode();
+}
+
 function setupCanvas(): void {
   canvas = document.getElementById("oc-canvas") as HTMLCanvasElement;
   if (!canvas) return;
   ctx = canvas.getContext("2d");
   if (!ctx) return;
 
-  // HiDPI setup handled in render()
   const resizeObserver = new ResizeObserver(() => {
     const dpr = window.devicePixelRatio || 1;
     const rect = canvas!.getBoundingClientRect();
@@ -107,7 +145,6 @@ function setupCanvas(): void {
   });
   resizeObserver.observe(canvas);
 
-  // Pan/zoom controller
   controllerState = createState();
   cleanupController = attachHandlers(canvas, controllerState, redraw);
 
@@ -170,12 +207,17 @@ function setupCanvas(): void {
     redraw();
   });
   document.getElementById("oc-fit")?.addEventListener("click", () => {
-    rebuildLayout(); // re-fits to view
+    rebuildLayout();
   });
 
   // Close button
   document.getElementById("oc-close")?.addEventListener("click", () => {
     logseq.hideMainUI({ restoreEditingCursor: true });
+  });
+
+  // Dock toggle button
+  document.getElementById("oc-dock-toggle")?.addEventListener("click", () => {
+    toggleDockMode();
   });
 }
 
@@ -186,7 +228,6 @@ function setupUI(): void {
   app.innerHTML = buildUI(VIEWS, activeView);
   setupCanvas();
 
-  // View switch buttons
   app.querySelectorAll(".oc-vb").forEach((btn) => {
     btn.addEventListener("click", () => {
       const viewId = btn.getAttribute("data-view") as ViewId;
@@ -195,14 +236,29 @@ function setupUI(): void {
   });
 }
 
+// --- Macro Renderer ---
+
+interface LogseqBlock {
+  uuid: string;
+  content?: string;
+  title?: string;
+  children?: LogseqBlock[];
+}
+
+function escapeHtml(str: string): string {
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
 async function main(): Promise<void> {
   console.log("OutlineCanvas loaded!");
   const offHooks: Array<() => void> = [];
 
   // Settings
   registerSettings();
-
-  // Set default view from settings
   activeView = getSettings().defaultView;
 
   // Detect initial theme
@@ -230,17 +286,31 @@ async function main(): Promise<void> {
       display: flex;
       align-items: center;
     }
+    .outline-canvas-inline {
+      width: 100%;
+      padding: 8px 0;
+      cursor: pointer;
+    }
+    .outline-canvas-inline img {
+      width: 100%;
+      height: auto;
+      border-radius: 8px;
+      border: 1px solid var(--ls-border-color, #333);
+      transition: border-color 0.15s;
+    }
+    .outline-canvas-inline img:hover {
+      border-color: var(--ls-link-ref-text-color, #46a758);
+    }
+    .outline-canvas-inline .oc-inline-label {
+      font-size: 11px;
+      color: var(--ls-secondary-text-color, #888);
+      margin-top: 4px;
+      text-align: center;
+    }
   `);
 
-  // Main UI panel setup
-  logseq.setMainUIInlineStyle({
-    position: "fixed",
-    zIndex: "999",
-    top: "0",
-    left: "0",
-    width: "100vw",
-    height: "100vh",
-  });
+  // Initial dock mode
+  applyDockMode();
 
   // Inject styles into plugin iframe
   const styleEl = document.createElement("style");
@@ -257,11 +327,20 @@ async function main(): Promise<void> {
   setupUI();
   applyThemeToUI();
 
-  // Model for toolbar click handler
+  // Model for click handlers
   logseq.provideModel({
     async openOutlineCanvas() {
       logseq.showMainUI({ autoFocus: true });
+      applyDockMode();
       await loadTree();
+    },
+    async openOutlineCanvasForBlock(e: { dataset: Record<string, string> }) {
+      const uuid = e.dataset.blockUuid;
+      if (uuid) {
+        logseq.showMainUI({ autoFocus: true });
+        applyDockMode();
+        await loadTree(uuid);
+      }
     },
   });
 
@@ -286,19 +365,93 @@ async function main(): Promise<void> {
       },
     },
     async () => {
-      logseq.showMainUI({ autoFocus: true });
-      await loadTree();
+      if (logseq.isMainUIVisible) {
+        // Toggle dock/full when already open
+        toggleDockMode();
+      } else {
+        logseq.showMainUI({ autoFocus: true });
+        applyDockMode();
+        await loadTree();
+      }
     }
   );
 
-  // Slash command — opens focused on current block
+  // Slash command — opens focused on current block (interactive overlay)
   logseq.Editor.registerSlashCommand("outline", async () => {
     const block = await logseq.Editor.getCurrentBlock();
     logseq.showMainUI({ autoFocus: true });
+    applyDockMode();
     if (block) {
       await loadTree(block.uuid);
     } else {
       await loadTree();
+    }
+  });
+
+  // Slash command — inserts inline macro renderer
+  logseq.Editor.registerSlashCommand("outline-canvas", async () => {
+    try {
+      await logseq.Editor.insertAtEditingCursor("{{renderer :outline-canvas}}");
+    } catch (err) {
+      console.error("OutlineCanvas: Failed to insert macro", err);
+      await logseq.UI.showMsg("Failed to insert outline-canvas macro", "error");
+    }
+  });
+
+  // --- Macro renderer: {{renderer :outline-canvas}} ---
+  logseq.App.onMacroRendererSlotted(async ({ slot, payload }) => {
+    const [type, viewArg] = payload.arguments;
+    if (type !== ":outline-canvas") return;
+
+    const blockUuid = payload.uuid;
+    const settings = getSettings();
+    const viewId: ViewId = (viewArg?.trim() as ViewId) || settings.defaultView;
+
+    try {
+      const block = await logseq.Editor.getBlock(blockUuid, { includeChildren: true });
+      if (!block || !block.children || block.children.length === 0) {
+        logseq.provideUI({
+          key: `outline-canvas-${blockUuid}`,
+          slot,
+          template: `<div class="outline-canvas-inline">
+            <div class="oc-inline-label">OutlineCanvas: Add child blocks to visualize</div>
+          </div>`,
+        });
+        return;
+      }
+
+      // Build tree from children
+      const tree = buildTree(
+        block.children as unknown as LogseqBlock[],
+        (block as Record<string, unknown>).content as string ?? "Outline",
+        settings.showEmptyBlocks
+      );
+      const flattened = flattenDeep(tree, settings.maxDepth);
+
+      // Render to image
+      const dataURL = renderToDataURL(flattened, viewId, settings.maxDepth, 800, 450);
+
+      logseq.provideUI({
+        key: `outline-canvas-${blockUuid}`,
+        slot,
+        template: `<div class="outline-canvas-inline">
+          <img src="${dataURL}" alt="OutlineCanvas diagram"
+               data-on-click="openOutlineCanvasForBlock"
+               data-block-uuid="${blockUuid}" />
+          <div class="oc-inline-label">◈ ${escapeHtml(VIEWS.find(v => v.id === viewId)?.label ?? "Tree Chart")} · Click to interact</div>
+        </div>`,
+      });
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : "Unknown error";
+      logseq.provideUI({
+        key: `outline-canvas-${blockUuid}`,
+        slot,
+        template: `<div class="outline-canvas-inline">
+          <div class="oc-inline-label" style="color: var(--ls-error-text-color, #e55);">
+            OutlineCanvas error: ${escapeHtml(msg)}
+          </div>
+        </div>`,
+      });
     }
   });
 
@@ -307,13 +460,14 @@ async function main(): Promise<void> {
     if (e.key === "Escape") {
       logseq.hideMainUI({ restoreEditingCursor: true });
     }
-    if (e.key === "0" && !e.ctrlKey && !e.metaKey) {
+    if (e.key === "0" && !e.ctrlKey && !e.metaKey && document.activeElement?.tagName === "CANVAS") {
       rebuildLayout();
     }
   });
 
-  // Close when clicking outside canvas area
+  // Close when clicking outside canvas area (only in full-screen mode)
   document.addEventListener("mousedown", (e) => {
+    if (isDocked) return; // don't close on click-outside in docked mode
     const target = e.target as HTMLElement;
     if (!target.closest(".oc-root")) {
       logseq.hideMainUI({ restoreEditingCursor: true });

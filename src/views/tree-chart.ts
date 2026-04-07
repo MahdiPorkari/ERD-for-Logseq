@@ -1,11 +1,11 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
-import { measureBoxHeight } from "../text";
+import { measureBoxHeight, adaptiveWidth } from "../text";
 
 /** Tree Chart: Root top-left, vertical spine, branches right with bezier S-curves */
 export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult {
-  const nW = 185, lW = 175, lGap = 7, bGap = 55;
-  const bX = 200, lX = bX + nW + 70;
+  const baseLW = 175, lGap = 7, bGap = 55;
+  const bX = 200;
   const els: RenderElement[] = [];
 
   // Root box
@@ -20,16 +20,25 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
   let curY = 25 + rootH + 40;
   const branchData: Array<{ mid: number; bi: number }> = [];
 
+  let maxRightEdge = 0;
+
   root.children.forEach((b, bi) => {
     const c = branchColor(bi);
     const kids = b.children;
 
-    // Compute branch box height from text
+    // Compute branch box width and height from text
     const branchText = `${bi + 1}. ${b.name}`;
+    const nW = adaptiveWidth(branchText, 185, 12, 600, 350);
     const branchH = measureBoxHeight(branchText, nW, 12, 600, 40);
 
+    // Compute per-branch leaf width
+    const maxLW = kids.length > 0
+      ? Math.max(baseLW, ...kids.map((k) => adaptiveWidth(k.name, baseLW, 12, 400, 400)))
+      : baseLW;
+    const lX = bX + nW + 70;
+
     // Compute each leaf height
-    const leafHeights = kids.map((k) => measureBoxHeight(k.name, lW, 12, 400, 34));
+    const leafHeights = kids.map((k) => measureBoxHeight(k.name, maxLW, 12, 400, 34));
     const kH = leafHeights.length > 0
       ? leafHeights.reduce((s, h) => s + h, 0) + (leafHeights.length - 1) * lGap
       : 0;
@@ -42,7 +51,7 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
     const zoneTop = curY - 8;
     const zoneH = blockH + 16;
     els.push({
-      type: "box", x: bX - 12, y: zoneTop, w: lX + lW - bX + 36, h: zoneH,
+      type: "box", x: bX - 12, y: zoneTop, w: lX + maxLW - bX + 36, h: zoneH,
       fill: c.zone, stroke: c.stroke + "20", lw: 1, rad: 10, dash: c.dash,
     });
 
@@ -69,7 +78,7 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
           color: c.stroke + "50", lw: 1.5,
         });
         els.push({
-          type: "box", x: lX, y: leafY, w: lW, h: lH,
+          type: "box", x: lX, y: leafY, w: maxLW, h: lH,
           fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
           text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
           uuid: k.uuid,
@@ -77,6 +86,7 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
         leafY += lH + lGap;
       });
     }
+    maxRightEdge = Math.max(maxRightEdge, lX + maxLW);
     curY += blockH + bGap;
   });
 
@@ -91,5 +101,5 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
     });
   });
 
-  return { elements: els, bounds: { x: 0, y: 0, w: lX + lW + 40, h: curY + 20 } };
+  return { elements: els, bounds: { x: 0, y: 0, w: maxRightEdge + 40, h: curY + 20 } };
 }

@@ -17,7 +17,10 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
     <div class="oc-root">
       <div class="oc-toolbar">
         <div class="oc-views">${viewButtons}</div>
-        <button class="oc-close" id="oc-close" title="Close (Esc)">✕</button>
+        <div class="oc-toolbar-right">
+          <button class="oc-ctrl" id="oc-dock-toggle" title="Toggle docked/full-screen">⊟</button>
+          <button class="oc-close" id="oc-close" title="Close (Esc)">✕</button>
+        </div>
       </div>
       <div class="oc-canvas-wrap">
         <canvas id="oc-canvas"></canvas>
@@ -88,6 +91,13 @@ export const STYLES = `
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.oc-toolbar-right {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-shrink: 0;
 }
 
 .oc-close {
@@ -222,4 +232,13 @@ export function applyThemeToUI(): void {
   const mode = theme().mode;
   document.documentElement.classList.remove("oc-dark", "oc-light");
   document.documentElement.classList.add(mode === "light" ? "oc-light" : "oc-dark");
+}
+
+/** Update the dock toggle button icon based on current mode */
+export function updateDockButton(isDocked: boolean): void {
+  const btn = document.getElementById("oc-dock-toggle");
+  if (btn) {
+    btn.textContent = isDocked ? "⊞" : "⊟";
+    btn.title = isDocked ? "Expand to full-screen" : "Dock to right side";
+  }
 }

@@ -1,6 +1,6 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
-import { measureBoxHeight } from "../text";
+import { measureBoxHeight, adaptiveWidth } from "../text";
 
 /** Fishbone (Ishikawa): horizontal spine with angled bones */
 export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult {
@@ -35,7 +35,7 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
     els.push({ type: "line", x1: boneX, y1: spY, x2: boneX + angleX * 0.3, y2: endY, color: c.stroke, lw: 2 });
 
     // Branch label box
-    const labelW = 140;
+    const labelW = adaptiveWidth(b.name, 140, 11, 600, 280);
     const labelH = measureBoxHeight(b.name, labelW, 11, 600, 36);
     const labelX = boneX + angleX * 0.3 - labelW / 2;
     const labelY = endY + dir * 8 + (isTop ? -labelH : 0);
@@ -56,7 +56,7 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
         x2: subX, y2: subY + dir * 14,
         color: c.stroke + "45", lw: 1,
       });
-      const subW = 120;
+      const subW = adaptiveWidth(k.name, 120, 12, 400, 250);
       const subH = measureBoxHeight(k.name, subW, 12, 400, 28);
       els.push({
         type: "box", x: subX - subW / 2, y: subY + dir * 14 + (isTop ? -subH - 2 : 2), w: subW, h: subH,

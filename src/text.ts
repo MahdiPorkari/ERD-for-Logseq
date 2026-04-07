@@ -51,6 +51,35 @@ export const TEXT_PAD_X = 8;
 export const TEXT_PAD_Y = 6;
 
 /**
+ * Compute an adaptive box width based on text length.
+ * Short text keeps the base width; longer text gets wider to avoid
+ * tall narrow columns, targeting ~3-4 wrapped lines max.
+ */
+export function adaptiveWidth(
+  text: string,
+  baseWidth: number,
+  fontSize: number,
+  fontWeight: number = 400,
+  maxWidth: number = 450
+): number {
+  const ctx = getMeasureCtx();
+  ctx.font = `${fontWeight} ${fontSize}px ${FONT}`;
+  const fullWidth = ctx.measureText(text).width + TEXT_PAD_X * 2;
+
+  // If text fits in one line at base width, keep it
+  if (fullWidth <= baseWidth) return baseWidth;
+
+  // Target ~3 lines: ideal width = sqrt(fullWidth * lineHeight * 3 * baseWidth)
+  // This gives a good aspect ratio for readability
+  const targetLines = 3;
+  const lineH = fontSize * LINE_HEIGHT;
+  const idealArea = fullWidth * lineH * targetLines;
+  const idealWidth = Math.sqrt(idealArea / (lineH * targetLines)) + TEXT_PAD_X * 2;
+
+  return Math.min(Math.max(idealWidth, baseWidth), maxWidth);
+}
+
+/**
  * Compute the height a box needs to fit wrapped text.
  * Returns the total box height including vertical padding.
  */

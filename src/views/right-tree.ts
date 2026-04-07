@@ -1,11 +1,18 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
-import { measureBoxHeight } from "../text";
+import { measureBoxHeight, adaptiveWidth } from "../text";
 
 function branchBoxSize(b: TreeNode): { w: number; h: number } {
-  const w = 185 + Math.min(b.children.length, 5) * 5;
+  const w = adaptiveWidth(b.name, 185, 12, 600, 350);
   const h = measureBoxHeight(b.name, w, 12, 600, 44);
   return { w, h };
+}
+
+/** Compute the max leaf width for a branch */
+function branchLeafWidth(b: TreeNode, baseLfW: number): number {
+  if (!b.children.length) return baseLfW;
+  const leafWidths = b.children.map((k) => adaptiveWidth(k.name, baseLfW, 12, 400, 400));
+  return Math.max(baseLfW, ...leafWidths);
 }
 
 /** Compute the total row height for a branch: max of branch box and its leaves */
@@ -21,14 +28,17 @@ function rowHeight(b: TreeNode, lfW: number, lfGap: number): number {
 export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
   const rootW = 200, rootX = 40, rootRad = 14;
-  const brGap = 24, lfGap = 6, lfW = 155;
+  const brGap = 24, lfGap = 6, baseLfW = 155;
   const colGap = 170, lfColGap = 55;
   const br = root.children;
 
   const rootH = measureBoxHeight(root.name, rootW, 16, 700, 60);
 
+  // Compute per-branch leaf widths
+  const branchLfWidths = br.map((b) => branchLeafWidth(b, baseLfW));
+
   // Total height uses row height (max of branch box and leaf stack)
-  const totalH = br.reduce((s, b) => s + rowHeight(b, lfW, lfGap), 0) + (br.length - 1) * brGap;
+  const totalH = br.reduce((s, b, i) => s + rowHeight(b, branchLfWidths[i], lfGap), 0) + (br.length - 1) * brGap;
   const startY = 40;
   const rootCy = startY + totalH / 2;
 
@@ -50,7 +60,8 @@ export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult
   br.forEach((b, bi) => {
     const c = branchColor(bi);
     const { w: brW, h: brH } = branchBoxSize(b);
-    const rH = rowHeight(b, lfW, lfGap);
+    const maxLfW = branchLfWidths[bi];
+    const rH = rowHeight(b, maxLfW, lfGap);
     const brCy = curY + rH / 2; // center within row, not just branch box
 
     // Root → branch bezier
@@ -72,7 +83,7 @@ export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult
 
     // Leaves
     if (b.children.length) {
-      const leafHeights = b.children.map((k) => measureBoxHeight(k.name, lfW, 12, 400, 32));
+      const leafHeights = b.children.map((k) => measureBoxHeight(k.name, maxLfW, 12, 400, 32));
       const kidsH = leafHeights.reduce((s, h) => s + h, 0) + (leafHeights.length - 1) * lfGap;
       const kidsStartY = curY + (rH - kidsH) / 2; // center leaves within the row
       const lfX = brX + brW + lfColGap;
@@ -87,7 +98,7 @@ export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult
           color: c.stroke + "40", lw: 1.3,
         });
         els.push({
-          type: "box", x: lfX, y: leafY, w: lfW, h: lfH,
+          type: "box", x: lfX, y: leafY, w: maxLfW, h: lfH,
           fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
           text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
           uuid: k.uuid,
@@ -99,5 +110,6 @@ export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult
   });
 
   const maxBrW = Math.max(...br.map((b) => branchBoxSize(b).w));
-  return { elements: els, bounds: { x: 0, y: 0, w: brX + maxBrW + lfColGap + lfW + 40, h: totalH + 80 } };
+  const maxLfWAll = Math.max(baseLfW, ...branchLfWidths);
+  return { elements: els, bounds: { x: 0, y: 0, w: brX + maxBrW + lfColGap + maxLfWAll + 40, h: totalH + 80 } };
 }

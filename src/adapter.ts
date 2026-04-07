@@ -93,60 +93,84 @@ function reindex(node: TreeNode, depth: number): TreeNode {
   return node;
 }
 
-/** Flatten nodes deeper than maxDepth into the maxDepth-1 level */
+/**
+ * Produce a 3-level tree (root → branches → leaves) for rendering.
+ *
+ * maxDepth controls how many levels of the original tree are expanded
+ * before collapsing into breadcrumb-style leaf labels:
+ * - maxDepth=3 (default): root → depth-1 children → depth-2 grandchildren
+ * - maxDepth=4: root → depth-1 → depth-2, with depth-3 nodes shown as
+ *   leaves with "parent > child" breadcrumb labels
+ * - maxDepth=6: deeper nesting is preserved in breadcrumb labels
+ *
+ * The output always has exactly 3 rendering levels so views don't need
+ * to handle arbitrary depth.
+ */
 export function flattenDeep(root: TreeNode, maxDepth: number): TreeNode {
-  return flattenNode(structuredClone(root), maxDepth, []);
+  const clone = structuredClone(root);
+  // Prune everything beyond maxDepth by flattening deep descendants
+  pruneDeep(clone, maxDepth);
+  // Now collapse to exactly 3 levels: root → branches → leaves
+  collapseToThreeLevels(clone);
+  return clone;
 }
 
-function flattenNode(
-  node: TreeNode,
-  maxDepth: number,
-  breadcrumb: string[]
-): TreeNode {
+/** Prune nodes beyond maxDepth: flatten their descendants into breadcrumb leaves */
+function pruneDeep(node: TreeNode, maxDepth: number): void {
   if (node.depth >= maxDepth - 1) {
-    // Flatten all descendants into this level
-    const flattened = collectLeaves(node, breadcrumb);
-    node.children = flattened;
-    return node;
+    // Collapse all descendants into flat leaves with breadcrumb names
+    node.children = collectAllLeaves(node);
+    return;
   }
-
-  node.children = node.children.map((child) =>
-    flattenNode(child, maxDepth, [...breadcrumb, node.name])
-  );
-  return node;
+  for (const child of node.children) {
+    pruneDeep(child, maxDepth);
+  }
 }
 
-function collectLeaves(node: TreeNode, breadcrumb: string[]): TreeNode[] {
+/** Collect all leaf-level descendants, flattening intermediate nodes into breadcrumb labels */
+function collectAllLeaves(node: TreeNode): TreeNode[] {
   if (node.children.length === 0) return [];
-
   const leaves: TreeNode[] = [];
   for (const child of node.children) {
-    if (child.children.length === 0) {
-      leaves.push(child);
-    } else {
-      // Flatten with breadcrumb prefix
-      const prefix =
-        breadcrumb.length > 0 ? `${child.name} > ` : `${child.name} > `;
-      for (const grandchild of collectDeep(child)) {
-        leaves.push({
-          ...grandchild,
-          name: `${prefix}${grandchild.name}`,
-          depth: node.depth + 1,
-          children: [],
-        });
-      }
-    }
+    gatherLeaves(child, "", leaves, node.depth + 1);
   }
   return leaves;
 }
 
-function collectDeep(node: TreeNode): TreeNode[] {
-  if (node.children.length === 0) return [node];
-  const result: TreeNode[] = [];
-  for (const child of node.children) {
-    result.push(...collectDeep(child));
+function gatherLeaves(node: TreeNode, prefix: string, out: TreeNode[], targetDepth: number): void {
+  const label = prefix ? `${prefix} > ${node.name}` : node.name;
+  if (node.children.length === 0) {
+    out.push({ ...node, name: label, depth: targetDepth, children: [] });
+  } else {
+    for (const child of node.children) {
+      gatherLeaves(child, label, out, targetDepth);
+    }
   }
-  return result;
+}
+
+/**
+ * Collapse a tree of arbitrary depth into exactly 3 levels.
+ * Depth-2+ nodes that still have children get their descendants
+ * flattened into breadcrumb-style leaf names.
+ */
+function collapseToThreeLevels(root: TreeNode): void {
+  for (const branch of root.children) {
+    // Branch is depth 1. Its children become depth 2 (leaves).
+    const newLeaves: TreeNode[] = [];
+    for (const child of branch.children) {
+      if (child.children.length === 0) {
+        child.depth = 2;
+        newLeaves.push(child);
+      } else {
+        // This node has sub-children — flatten them into breadcrumb leaves
+        child.depth = 2;
+        gatherLeaves(child, "", newLeaves, 2);
+      }
+    }
+    branch.children = newLeaves;
+    branch.depth = 1;
+  }
+  root.depth = 0;
 }
 
 /** Fetch the current page's block tree from Logseq and build an internal tree */
