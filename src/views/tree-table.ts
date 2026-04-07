@@ -1,5 +1,5 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
-import { branchColor, ROOT_TEXT, MUTED } from "../colors";
+import { branchColor, ROOT_TEXT, MUTED, theme } from "../colors";
 import { measureBoxHeight } from "../text";
 
 /** Count leaf nodes for spanning */
@@ -65,23 +65,23 @@ export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult
   const tH = hH + totalRowH + p;
 
   // Background
-  els.push({ type: "box", x: 0, y: 0, w: tW, h: tH, fill: "#111318", stroke: "#2b2d35", lw: 1, rad: 0 });
+  els.push({ type: "box", x: 0, y: 0, w: tW, h: tH, fill: theme().tableBg, stroke: theme().tableBorder, lw: 1, rad: 0 });
 
   // Column headers
   const headerLabels = ["Group", "Category", "Sub-category", "Item", "Detail", "Attribute"];
   for (let d = 0; d < md; d++) {
-    els.push({ type: "box", x: p + d * cW, y: 0, w: cW, h: hH, fill: "#1a1d24", stroke: "#2b2d35", lw: 0.5, rad: 0 });
+    els.push({ type: "box", x: p + d * cW, y: 0, w: cW, h: hH, fill: theme().tableHeaderBg, stroke: theme().tableBorder, lw: 0.5, rad: 0 });
     const label = d < headerLabels.length ? headerLabels[d] : `Level ${d + 1}`;
-    els.push({ type: "text", text: label, x: p + d * cW + cW / 2, y: hH / 2, color: MUTED, size: 10, weight: 600, align: "center" });
+    els.push({ type: "text", text: label, x: p + d * cW + cW / 2, y: hH / 2, color: MUTED(), size: 10, weight: 600, align: "center" });
   }
-  els.push({ type: "line", x1: 0, y1: hH, x2: tW, y2: hH, color: "#46a758", lw: 2 });
+  els.push({ type: "line", x1: 0, y1: hH, x2: tW, y2: hH, color: theme().accent, lw: 2 });
 
   // Cells
   const placed: boolean[][] = Array.from({ length: rows.length }, () => Array(md).fill(false));
   rows.forEach((row, ri) => {
     // Alternating stripe
     if (ri % 2 === 1) {
-      els.push({ type: "box", x: p, y: hH + rowY[ri], w: tW - p * 2, h: rowHeights[ri], fill: "#ffffff04", stroke: "transparent", lw: 0, rad: 0 });
+      els.push({ type: "box", x: p, y: hH + rowY[ri], w: tW - p * 2, h: rowHeights[ri], fill: theme().tableStripe, stroke: "transparent", lw: 0, rad: 0 });
     }
     let ci = 0;
     for (const cell of row) {
@@ -99,9 +99,9 @@ export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult
         }
         els.push({
           type: "box", x: cx + 1, y: cy + 1, w: cW - 2, h: ch - 2,
-          fill: cell.isLeaf ? "transparent" : c.fill, stroke: "#2b2d35", lw: 0.5, rad: 0,
+          fill: cell.isLeaf ? "transparent" : c.fill, stroke: theme().tableBorder, lw: 0.5, rad: 0,
           text: cell.text,
-          textColor: cell.isLeaf ? MUTED : ROOT_TEXT,
+          textColor: cell.isLeaf ? MUTED() : ROOT_TEXT(),
           textSize: cell.isLeaf ? 11 : 12,
           textWeight: cell.isLeaf ? 400 : 600,
         });

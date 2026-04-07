@@ -1,5 +1,5 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
-import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight } from "../text";
 
 /** Tree Chart: Root top-left, vertical spine, branches right with bezier S-curves */
@@ -12,8 +12,8 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
   const rootH = measureBoxHeight(root.name, 150, 15, 700, 50);
   els.push({
     type: "box", x: 25, y: 25, w: 150, h: rootH,
-    fill: "#46a75818", stroke: "#46a758", lw: 2.5, rad: 10,
-    text: root.name, textColor: ROOT_TEXT, textSize: 15, textWeight: 700,
+    fill: theme().rootFill, stroke: theme().rootStroke, lw: 2.5, rad: 10,
+    text: root.name, textColor: ROOT_TEXT(), textSize: 15, textWeight: 700,
     uuid: root.uuid,
   });
 
@@ -71,7 +71,7 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
         els.push({
           type: "box", x: lX, y: leafY, w: lW, h: lH,
           fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
-          text: k.name, textColor: LEAF_TEXT, textSize: 12, dash: c.dash,
+          text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
           uuid: k.uuid,
         });
         leafY += lH + lGap;

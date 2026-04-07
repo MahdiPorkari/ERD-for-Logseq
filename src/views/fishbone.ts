@@ -1,5 +1,5 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
-import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight } from "../text";
 
 /** Fishbone (Ishikawa): horizontal spine with angled bones */
@@ -14,12 +14,12 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
   const headH = measureBoxHeight(root.name, headW, 14, 700, 50);
 
   // Spine
-  els.push({ type: "line", x1: 40, y1: spY, x2: hX, y2: spY, color: "#46a758", lw: 2.5 });
+  els.push({ type: "line", x1: 40, y1: spY, x2: hX, y2: spY, color: theme().accent, lw: 2.5 });
 
   els.push({
     type: "box", x: hX, y: spY - headH / 2, w: headW, h: headH,
-    fill: "#46a75818", stroke: "#46a758", lw: 2, rad: 8,
-    text: root.name, textColor: ROOT_TEXT, textSize: 14, textWeight: 700,
+    fill: theme().rootFill, stroke: theme().rootStroke, lw: 2, rad: 8,
+    text: root.name, textColor: ROOT_TEXT(), textSize: 14, textWeight: 700,
     uuid: root.uuid,
   });
 
@@ -61,7 +61,7 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
       els.push({
         type: "box", x: subX - subW / 2, y: subY + dir * 14 + (isTop ? -subH - 2 : 2), w: subW, h: subH,
         fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 4,
-        text: k.name, textColor: LEAF_TEXT, textSize: 12, dash: c.dash,
+        text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
         uuid: k.uuid,
       });
     });

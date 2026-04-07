@@ -68,7 +68,7 @@ export function layoutTreemap(root: TreeNode, _maxDepth: number): LayoutResult {
         type: "box", x: x + 1, y: y + 1, w: cellW, h: cellH,
         fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 4, dash: c.dash,
         text: showText ? n.name : undefined,
-        textColor: LEAF_TEXT,
+        textColor: LEAF_TEXT(),
         textSize: fontSize,
         textWeight: 400,
       });

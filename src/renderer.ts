@@ -14,7 +14,7 @@ export function render(
 
   // Clear
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  ctx.fillStyle = BG;
+  ctx.fillStyle = BG();
   ctx.fillRect(0, 0, width, height);
 
   // Apply pan/zoom

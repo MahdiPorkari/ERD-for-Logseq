@@ -1,5 +1,5 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
-import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight } from "../text";
 
 const LF_W = 155;
@@ -44,14 +44,14 @@ export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
   const rootCx = 500, rootCy = centerY;
 
   // Root glow
-  els.push({ type: "dot", x: rootCx, y: rootCy, r: 60, color: "#46a75808" });
-  els.push({ type: "dot", x: rootCx, y: rootCy, r: 45, color: "#46a75810" });
+  els.push({ type: "dot", x: rootCx, y: rootCy, r: 60, color: theme().rootGlow1 });
+  els.push({ type: "dot", x: rootCx, y: rootCy, r: 45, color: theme().rootGlow2 });
 
   // Root box
   els.push({
     type: "box", x: rootCx - rootW / 2, y: rootCy - rootH / 2, w: rootW, h: rootH,
-    fill: "#1a1d2480", stroke: "#46a758", lw: 2.5, rad: rootRad,
-    text: root.name, textColor: ROOT_TEXT, textSize: 16, textWeight: 700,
+    fill: theme().rootBoxFill, stroke: theme().rootStroke, lw: 2.5, rad: rootRad,
+    text: root.name, textColor: ROOT_TEXT(), textSize: 16, textWeight: 700,
     uuid: root.uuid,
   });
 
@@ -107,7 +107,7 @@ export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
           els.push({
             type: "box", x: lfX, y: leafY, w: LF_W, h: lfH,
             fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
-            text: k.name, textColor: LEAF_TEXT, textSize: 12, dash: c.dash,
+            text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
             uuid: k.uuid,
           });
           leafY += lfH + LF_GAP;

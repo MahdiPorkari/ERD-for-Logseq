@@ -1,4 +1,5 @@
 import type { ViewId, ViewDef } from "./types";
+import { theme } from "./colors";
 
 /** Build the HTML for the main UI panel (injected into #app in the iframe) */
 export function buildUI(views: ViewDef[], activeView: ViewId): string {
@@ -34,6 +35,11 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
 /** CSS styles for the plugin UI */
 export const STYLES = `
 :root {
+  --oc-radius: 6px;
+  --oc-font: 'IBM Plex Mono', 'SF Mono', monospace;
+}
+
+:root.oc-dark {
   --oc-bg: #0d0f14;
   --oc-surface: #1e1f24;
   --oc-border: #2b2d35;
@@ -43,8 +49,18 @@ export const STYLES = `
   --oc-accent: #46a758;
   --oc-accent-dim: #46a75820;
   --oc-accent-text: #7ccf8e;
-  --oc-radius: 6px;
-  --oc-font: 'IBM Plex Mono', 'SF Mono', monospace;
+}
+
+:root.oc-light {
+  --oc-bg: #f8f9fa;
+  --oc-surface: #ffffff;
+  --oc-border: #d8dae0;
+  --oc-border2: #c0c3cc;
+  --oc-text: #3a3a4a;
+  --oc-text-muted: #8888a0;
+  --oc-accent: #388e3c;
+  --oc-accent-dim: #46a75818;
+  --oc-accent-text: #2d7a30;
 }
 
 .oc-root {
@@ -199,4 +215,11 @@ export function setActiveView(container: Element, viewId: ViewId): void {
       btn.getAttribute("data-view") === viewId
     );
   });
+}
+
+/** Apply the current theme mode to the UI CSS variables */
+export function applyThemeToUI(): void {
+  const mode = theme().mode;
+  document.documentElement.classList.remove("oc-dark", "oc-light");
+  document.documentElement.classList.add(mode === "light" ? "oc-light" : "oc-dark");
 }

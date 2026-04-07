@@ -4,7 +4,8 @@ import { registerSettings, getSettings } from "./settings";
 import { fetchTree, fetchBlockTree, flattenDeep } from "./adapter";
 import { render, hitTest } from "./renderer";
 import { createState, fitToView, zoomIn, zoomOut, attachHandlers } from "./controller";
-import { buildUI, STYLES, setActiveView } from "./ui";
+import { buildUI, STYLES, setActiveView, applyThemeToUI } from "./ui";
+import { setTheme } from "./colors";
 import { layoutTreeChart } from "./views/tree-chart";
 import { layoutTreeTable } from "./views/tree-table";
 import { layoutRoadmapAlt, layoutRoadmapLinear } from "./views/roadmap";
@@ -204,6 +205,25 @@ async function main(): Promise<void> {
   // Set default view from settings
   activeView = getSettings().defaultView;
 
+  // Detect initial theme
+  try {
+    const configs = await logseq.App.getUserConfigs();
+    const mode = configs?.preferredThemeMode === "light" ? "light" : "dark";
+    setTheme(mode);
+  } catch {
+    setTheme("dark");
+  }
+
+  // Listen for theme changes
+  const offTheme = logseq.App.onThemeModeChanged(({ mode }) => {
+    setTheme(mode === "light" ? "light" : "dark");
+    applyThemeToUI();
+    if (logseq.isMainUIVisible) {
+      rebuildLayout();
+    }
+  });
+  if (typeof offTheme === "function") offHooks.push(offTheme);
+
   // CSS — injected into parent frame
   logseq.provideStyle(`
     .outline-canvas-btn {
@@ -235,6 +255,7 @@ async function main(): Promise<void> {
 
   // Build UI
   setupUI();
+  applyThemeToUI();
 
   // Model for toolbar click handler
   logseq.provideModel({

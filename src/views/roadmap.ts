@@ -1,5 +1,5 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
-import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight } from "../text";
 
 /** Roadmap layout — shared by both alternating and linear modes */
@@ -30,18 +30,18 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
   // Root box
   els.push({
     type: "box", x: 20, y: spY - rootH / 2, w: rW, h: rootH,
-    fill: "#46a75818", stroke: "#46a758", lw: 2.5, rad: 10,
-    text: root.name, textColor: ROOT_TEXT, textSize: 14, textWeight: 700,
+    fill: theme().rootFill, stroke: theme().rootStroke, lw: 2.5, rad: 10,
+    text: root.name, textColor: ROOT_TEXT(), textSize: 14, textWeight: 700,
     uuid: root.uuid,
   });
 
   // Spine
   const spineEndX = startX + totalPhasesW + 50;
-  els.push({ type: "line", x1: 20 + rW, y1: spY, x2: spineEndX, y2: spY, color: "#46a75825", lw: 3 });
+  els.push({ type: "line", x1: 20 + rW, y1: spY, x2: spineEndX, y2: spY, color: theme().accent + "25", lw: 3 });
 
   // Arrow
-  els.push({ type: "line", x1: spineEndX - 10, y1: spY - 6, x2: spineEndX, y2: spY, color: "#46a75850", lw: 2.5 });
-  els.push({ type: "line", x1: spineEndX - 10, y1: spY + 6, x2: spineEndX, y2: spY, color: "#46a75850", lw: 2.5 });
+  els.push({ type: "line", x1: spineEndX - 10, y1: spY - 6, x2: spineEndX, y2: spY, color: theme().accent + "50", lw: 2.5 });
+  els.push({ type: "line", x1: spineEndX - 10, y1: spY + 6, x2: spineEndX, y2: spY, color: theme().accent + "50", lw: 2.5 });
 
   phaseData.forEach(({ b, bi, kids, kidHeights, cardH }, pi) => {
     const c = branchColor(bi);
@@ -52,7 +52,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
 
     // Phase dot on spine
     els.push({ type: "dot", x: px + phaseW / 2, y: spY, r: 14, color: c.fill });
-    els.push({ type: "dot", x: px + phaseW / 2, y: spY, r: 12, color: "#0d0f14" });
+    els.push({ type: "dot", x: px + phaseW / 2, y: spY, r: 12, color: theme().spineDotInner });
     els.push({ type: "text", text: `${bi + 1}`, x: px + phaseW / 2, y: spY, color: c.stroke, size: 12, weight: 700, align: "center" });
 
     // Vertical connector
@@ -77,8 +77,8 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
     if (pi < phaseData.length - 1) {
       const nextPx = startX + (pi + 1) * (phaseW + phaseGap);
       const mx = (px + phaseW + nextPx) / 2;
-      els.push({ type: "line", x1: mx - 4, y1: spY - 4, x2: mx + 3, y2: spY, color: "#46a75845", lw: 1.5 });
-      els.push({ type: "line", x1: mx - 4, y1: spY + 4, x2: mx + 3, y2: spY, color: "#46a75845", lw: 1.5 });
+      els.push({ type: "line", x1: mx - 4, y1: spY - 4, x2: mx + 3, y2: spY, color: theme().accent + "45", lw: 1.5 });
+      els.push({ type: "line", x1: mx - 4, y1: spY + 4, x2: mx + 3, y2: spY, color: theme().accent + "45", lw: 1.5 });
     }
 
     // Children inside card
@@ -88,7 +88,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
       els.push({
         type: "box", x: px + 8, y: itemY, w: phaseW - 16, h: itemH,
         fill: c.leafFill, stroke: c.leafStroke, lw: 0.7, rad: 5,
-        text: k.name, textColor: LEAF_TEXT, textSize: 12, dash: c.dash,
+        text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
         uuid: k.uuid,
       });
       itemY += itemH + itemGap;
