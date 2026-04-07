@@ -1,19 +1,27 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { measureBoxHeight } from "../text";
 
 /** Roadmap layout — shared by both alternating and linear modes */
 export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: boolean): LayoutResult {
   const els: RenderElement[] = [];
   const br = root.children;
-  const rW = 150, rootH = 52;
-  const phaseW = 180, itemH = 28, itemGap = 4;
+  const rW = 150;
+  const phaseW = 180, itemGap = 4;
   const itemPadTop = 38, itemPadBot = 10, phaseGap = 40;
+
+  // Root box
+  const rootH = measureBoxHeight(root.name, rW, 14, 700, 52);
   const spY = alternating ? 280 : 100;
 
-  // Phase card heights
+  // Phase card heights — compute item heights dynamically
   const phaseData = br.map((b, bi) => {
-    const cardH = Math.max(itemPadTop + b.children.length * (itemH + itemGap) - itemGap + itemPadBot, 60);
-    return { b, bi, kids: b.children, cardH };
+    const kidHeights = b.children.map((k) => measureBoxHeight(k.name, phaseW - 16, 12, 400, 28));
+    const kidsH = kidHeights.length > 0
+      ? kidHeights.reduce((s, h) => s + h, 0) + (kidHeights.length - 1) * itemGap
+      : 0;
+    const cardH = Math.max(itemPadTop + kidsH + itemPadBot, 60);
+    return { b, bi, kids: b.children, kidHeights, cardH };
   });
 
   const totalPhasesW = phaseData.length * (phaseW + phaseGap) - phaseGap;
@@ -35,7 +43,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
   els.push({ type: "line", x1: spineEndX - 10, y1: spY - 6, x2: spineEndX, y2: spY, color: "#46a75850", lw: 2.5 });
   els.push({ type: "line", x1: spineEndX - 10, y1: spY + 6, x2: spineEndX, y2: spY, color: "#46a75850", lw: 2.5 });
 
-  phaseData.forEach(({ b, bi, kids, cardH }, pi) => {
+  phaseData.forEach(({ b, bi, kids, kidHeights, cardH }, pi) => {
     const c = branchColor(bi);
     const px = startX + pi * (phaseW + phaseGap);
     const isAbove = alternating ? pi % 2 === 0 : false;
@@ -56,9 +64,10 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
     els.push({ type: "box", x: px, y: cardY, w: phaseW, h: cardH, fill: c.zone, stroke: c.stroke + "40", lw: 1, rad: 10 });
 
     // Header inside card
+    const headerH = measureBoxHeight(b.name, phaseW - 12, 12, 600, 26);
     const headerY = cardY + 8;
     els.push({
-      type: "box", x: px + 6, y: headerY, w: phaseW - 12, h: 26,
+      type: "box", x: px + 6, y: headerY, w: phaseW - 12, h: headerH,
       fill: c.fill, stroke: c.stroke, lw: 1, rad: 6,
       text: b.name, textColor: c.text, textSize: 12, textWeight: 600,
       uuid: b.uuid,
@@ -73,14 +82,16 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
     }
 
     // Children inside card
+    let itemY = headerY + headerH + 4;
     kids.forEach((k, ki) => {
-      const iy = headerY + 30 + ki * (itemH + itemGap);
+      const itemH = kidHeights[ki];
       els.push({
-        type: "box", x: px + 8, y: iy, w: phaseW - 16, h: itemH,
+        type: "box", x: px + 8, y: itemY, w: phaseW - 16, h: itemH,
         fill: c.leafFill, stroke: c.leafStroke, lw: 0.7, rad: 5,
         text: k.name, textColor: LEAF_TEXT, textSize: 12, dash: c.dash,
         uuid: k.uuid,
       });
+      itemY += itemH + itemGap;
     });
   });
 

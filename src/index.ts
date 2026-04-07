@@ -171,6 +171,11 @@ function setupCanvas(): void {
   document.getElementById("oc-fit")?.addEventListener("click", () => {
     rebuildLayout(); // re-fits to view
   });
+
+  // Close button
+  document.getElementById("oc-close")?.addEventListener("click", () => {
+    logseq.hideMainUI({ restoreEditingCursor: true });
+  });
 }
 
 function setupUI(): void {
@@ -257,7 +262,6 @@ async function main(): Promise<void> {
       keybinding: {
         mode: "global",
         binding: "mod+shift+o",
-        mac: "cmd+shift+o",
       },
     },
     async () => {

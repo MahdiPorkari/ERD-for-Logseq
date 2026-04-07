@@ -1,5 +1,6 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, MUTED } from "../colors";
+import { measureBoxHeight } from "../text";
 
 /** Count leaf nodes for spanning */
 function countLeaves(n: TreeNode): number {
@@ -23,7 +24,7 @@ interface Cell {
 export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
   const md = maxDepth(root);
-  const cW = 185, rH = 36, hH = 40, p = 12;
+  const cW = 185, hH = 40, p = 12;
   const tW = cW * md + p * 2;
   const rows: Cell[][] = [];
 
@@ -43,7 +44,25 @@ export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult
   }
   root.children.forEach((c) => walk(c, 0));
 
-  const tH = hH + rows.length * rH + p;
+  // Compute row heights based on content
+  const rowHeights: number[] = rows.map((row) => {
+    let maxH = 36; // minimum row height
+    for (const cell of row) {
+      if (!cell.empty && cell.text) {
+        const h = measureBoxHeight(cell.text, cW - 18, cell.isLeaf ? 11 : 12, cell.isLeaf ? 400 : 600, 36);
+        maxH = Math.max(maxH, h);
+      }
+    }
+    return maxH;
+  });
+
+  // Cumulative Y offsets for rows
+  const rowY: number[] = [0];
+  for (let i = 0; i < rowHeights.length; i++) {
+    rowY.push(rowY[i] + rowHeights[i]);
+  }
+  const totalRowH = rowY[rowY.length - 1];
+  const tH = hH + totalRowH + p;
 
   // Background
   els.push({ type: "box", x: 0, y: 0, w: tW, h: tH, fill: "#111318", stroke: "#2b2d35", lw: 1, rad: 0 });
@@ -62,7 +81,7 @@ export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult
   rows.forEach((row, ri) => {
     // Alternating stripe
     if (ri % 2 === 1) {
-      els.push({ type: "box", x: p, y: hH + ri * rH, w: tW - p * 2, h: rH, fill: "#ffffff04", stroke: "transparent", lw: 0, rad: 0 });
+      els.push({ type: "box", x: p, y: hH + rowY[ri], w: tW - p * 2, h: rowHeights[ri], fill: "#ffffff04", stroke: "transparent", lw: 0, rad: 0 });
     }
     let ci = 0;
     for (const cell of row) {
@@ -71,19 +90,24 @@ export function layoutTreeTable(root: TreeNode, _maxDepth: number): LayoutResult
       for (let s = 0; s < cell.span; s++) if (ri + s < rows.length) placed[ri + s][ci] = true;
       if (!cell.empty) {
         const c = branchColor(cell.depth);
-        const cx = p + ci * cW, cy = hH + ri * rH, ch = cell.span * rH;
+        const cx = p + ci * cW;
+        const cy = hH + rowY[ri];
+        // Spanning cell height = sum of spanned row heights
+        let ch = 0;
+        for (let s = 0; s < cell.span; s++) {
+          if (ri + s < rowHeights.length) ch += rowHeights[ri + s];
+        }
         els.push({
           type: "box", x: cx + 1, y: cy + 1, w: cW - 2, h: ch - 2,
           fill: cell.isLeaf ? "transparent" : c.fill, stroke: "#2b2d35", lw: 0.5, rad: 0,
+          text: cell.text,
+          textColor: cell.isLeaf ? MUTED : ROOT_TEXT,
+          textSize: cell.isLeaf ? 11 : 12,
+          textWeight: cell.isLeaf ? 400 : 600,
         });
         if (!cell.isLeaf) {
           els.push({ type: "line", x1: cx + 1, y1: cy + 1, x2: cx + 1, y2: cy + ch - 2, color: c.stroke, lw: 3 });
         }
-        els.push({
-          type: "text", text: cell.text, x: cx + 16, y: cy + ch / 2,
-          color: cell.isLeaf ? MUTED : ROOT_TEXT,
-          size: cell.isLeaf ? 11 : 12, weight: cell.isLeaf ? 400 : 600, align: "left",
-        });
       }
       ci++;
     }

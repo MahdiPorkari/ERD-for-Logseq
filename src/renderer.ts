@@ -1,5 +1,6 @@
 import type { RenderElement, Transform } from "./types";
 import { BG, FONT } from "./colors";
+import { wrapText, LINE_HEIGHT, TEXT_PAD_X, TEXT_PAD_Y } from "./text";
 
 /** Draw all elements to a canvas context with the given transform */
 export function render(
@@ -65,17 +66,22 @@ function drawBox(
   }
 
   if (el.text) {
+    const fontSize = el.textSize ?? 12;
+    const fontWeight = el.textWeight ?? 400;
     ctx.fillStyle = el.textColor ?? "#edeef0";
-    ctx.font = `${el.textWeight ?? 400} ${el.textSize ?? 12}px ${FONT}`;
+    ctx.font = `${fontWeight} ${fontSize}px ${FONT}`;
     ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+    ctx.textBaseline = "top";
 
-    const maxWidth = el.w - 12;
-    const label =
-      ctx.measureText(el.text).width > maxWidth
-        ? truncate(ctx, el.text, maxWidth)
-        : el.text;
-    ctx.fillText(label, el.x + el.w / 2, el.y + el.h / 2);
+    const maxTextWidth = el.w - TEXT_PAD_X * 2;
+    const lines = wrapText(el.text, maxTextWidth, fontSize, fontWeight);
+    const lineH = fontSize * LINE_HEIGHT;
+    const textBlockH = lines.length * lineH;
+    const startY = el.y + (el.h - textBlockH) / 2 + TEXT_PAD_Y / 2;
+
+    for (let i = 0; i < lines.length; i++) {
+      ctx.fillText(lines[i], el.x + el.w / 2, startY + i * lineH);
+    }
   }
 }
 
@@ -122,19 +128,6 @@ function drawDot(
   ctx.arc(el.x, el.y, el.r, 0, Math.PI * 2);
   ctx.fillStyle = el.color;
   ctx.fill();
-}
-
-/** Truncate text with ellipsis to fit maxWidth */
-function truncate(
-  ctx: CanvasRenderingContext2D,
-  text: string,
-  maxWidth: number
-): string {
-  let t = text;
-  while (t.length > 1 && ctx.measureText(t + "…").width > maxWidth) {
-    t = t.slice(0, -1);
-  }
-  return t + "…";
 }
 
 /** Hit-test: find the topmost box element at canvas coordinates */

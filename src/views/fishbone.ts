@@ -1,5 +1,6 @@
 import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT } from "../colors";
+import { measureBoxHeight } from "../text";
 
 /** Fishbone (Ishikawa): horizontal spine with angled bones */
 export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult {
@@ -7,12 +8,14 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
   const br = root.children;
   const spacing = 220, boneLen = 130, spY = 300;
   const hX = 100 + br.length * spacing + 60;
-  const headW = 180, headH = 50;
+  const headW = 180;
+
+  // Head box
+  const headH = measureBoxHeight(root.name, headW, 14, 700, 50);
 
   // Spine
   els.push({ type: "line", x1: 40, y1: spY, x2: hX, y2: spY, color: "#46a758", lw: 2.5 });
 
-  // Head box
   els.push({
     type: "box", x: hX, y: spY - headH / 2, w: headW, h: headH,
     fill: "#46a75818", stroke: "#46a758", lw: 2, rad: 8,
@@ -28,11 +31,12 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
     const angleX = boneLen * 0.5;
     const endY = spY + dir * boneLen;
 
-    // Bone line (angled slightly)
+    // Bone line
     els.push({ type: "line", x1: boneX, y1: spY, x2: boneX + angleX * 0.3, y2: endY, color: c.stroke, lw: 2 });
 
     // Branch label box
-    const labelW = 140, labelH = 36;
+    const labelW = 140;
+    const labelH = measureBoxHeight(b.name, labelW, 11, 600, 36);
     const labelX = boneX + angleX * 0.3 - labelW / 2;
     const labelY = endY + dir * 8 + (isTop ? -labelH : 0);
     els.push({
@@ -52,7 +56,8 @@ export function layoutFishbone(root: TreeNode, _maxDepth: number): LayoutResult 
         x2: subX, y2: subY + dir * 14,
         color: c.stroke + "45", lw: 1,
       });
-      const subW = 120, subH = 28;
+      const subW = 120;
+      const subH = measureBoxHeight(k.name, subW, 12, 400, 28);
       els.push({
         type: "box", x: subX - subW / 2, y: subY + dir * 14 + (isTop ? -subH - 2 : 2), w: subW, h: subH,
         fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 4,

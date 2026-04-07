@@ -16,6 +16,7 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
     <div class="oc-root">
       <div class="oc-toolbar">
         <div class="oc-views">${viewButtons}</div>
+        <button class="oc-close" id="oc-close" title="Close (Esc)">✕</button>
       </div>
       <div class="oc-canvas-wrap">
         <canvas id="oc-canvas"></canvas>
@@ -61,12 +62,38 @@ export const STYLES = `
   padding: 8px 12px;
   border-bottom: 1px solid var(--oc-border);
   flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .oc-views {
   display: flex;
   gap: 4px;
   flex-wrap: wrap;
+}
+
+.oc-close {
+  width: 28px;
+  height: 28px;
+  border-radius: var(--oc-radius);
+  background: var(--oc-surface);
+  border: 1px solid var(--oc-border);
+  color: var(--oc-text-muted);
+  font-size: 14px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.12s;
+}
+
+.oc-close:hover {
+  border-color: #e5484d;
+  color: #ff9592;
+  background: #e5484d18;
 }
 
 .oc-vb {
