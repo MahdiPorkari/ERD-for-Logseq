@@ -1,0 +1,644 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>OutlineCanvas v2</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#111113;--bg-s:#18191b;--srf:#1e1f24;--bdr:#2b2d35;--bdr2:#363842;--t1:#edeef0;--t2:#b0b4ba;--t3:#6f7380;--acc:#46a758;--acc-d:#46a75820;--acc-t:#7ccf8e;--r:6px;--f:'IBM Plex Mono','SF Mono',monospace;--fs:-apple-system,'SF Pro',system-ui,sans-serif}
+*{margin:0;padding:0;box-sizing:border-box}body{font-family:var(--fs);background:var(--bg);color:var(--t2);overflow:hidden;height:100dvh}button{font-family:var(--fs);cursor:pointer;border:none;outline:none}textarea{font-family:var(--f)}
+.app{display:flex;height:100dvh}
+.sb{width:300px;flex-shrink:0;display:flex;flex-direction:column;background:var(--bg-s);border-right:1px solid var(--bdr);transition:margin-left .2s}.sb.closed{margin-left:-300px}
+.sb-h{padding:16px 16px 12px;border-bottom:1px solid var(--bdr)}.sb-h h1{font-size:16px;font-weight:700;color:var(--t1);display:flex;align-items:center;gap:8px}.sb-h .a{color:var(--acc)}
+.badge{display:inline-block;padding:2px 8px;border-radius:99px;font-size:10px;font-weight:600}.ba{background:var(--acc-d);color:var(--acc-t)}.bo{border:1px solid var(--bdr);color:var(--t3);background:transparent}
+.sb-sub{font-size:11px;color:var(--t3);margin-top:4px}
+.vs{padding:12px 16px;border-bottom:1px solid var(--bdr)}.vs-l{font-size:10px;font-weight:600;color:var(--t3);text-transform:uppercase;letter-spacing:.1em;margin-bottom:8px}
+.vg{display:flex;gap:4px;flex-wrap:wrap}
+.vb{padding:6px 10px;border-radius:var(--r);font-size:10px;font-weight:500;background:var(--srf);color:var(--t3);border:1px solid var(--bdr);display:flex;align-items:center;gap:5px;transition:all .12s}.vb:hover{border-color:var(--bdr2);color:var(--t2)}.vb.on{background:var(--acc-d);border-color:var(--acc);color:var(--acc-t)}.vb .i{font-size:13px}
+.vl{font-size:11px;color:var(--t3);margin-top:8px}
+.es{flex:1;display:flex;flex-direction:column;padding:12px 16px;min-height:0}
+.es textarea{flex:1;width:100%;background:var(--srf);border:1px solid var(--bdr);border-radius:var(--r);color:var(--t2);padding:10px 12px;font-size:11.5px;line-height:1.8;resize:none;outline:none;transition:border-color .15s}.es textarea:focus{border-color:var(--acc)}
+.st{padding:10px 16px;border-top:1px solid var(--bdr);display:flex;gap:8px;flex-wrap:wrap}
+.tb{position:fixed;top:10px;z-index:20;width:28px;height:28px;border-radius:var(--r);background:var(--srf);border:1px solid var(--bdr);color:var(--t3);font-size:14px;display:flex;align-items:center;justify-content:center;transition:left .2s}.tb:hover{border-color:var(--bdr2);color:var(--t2)}
+.ca{flex:1;position:relative;overflow:hidden;background:#0d0f14}.ca canvas{display:block;width:100%;height:100%;touch-action:none;cursor:grab;transition:opacity .18s ease}.ca canvas:active{cursor:grabbing}.ca canvas.fading{opacity:0}
+.cc{position:absolute;bottom:12px;right:12px;display:flex;gap:4px}
+.cb{width:30px;height:30px;border-radius:var(--r);background:var(--srf);border:1px solid var(--bdr);color:var(--t3);font-size:16px;display:flex;align-items:center;justify-content:center}.cb:hover{border-color:var(--bdr2);color:var(--t2)}
+/* Breadcrumb overlay for treemap hover */
+.bc{position:absolute;top:12px;left:12px;padding:6px 12px;background:var(--srf);border:1px solid var(--bdr);border-radius:var(--r);font-size:11px;color:var(--acc-t);font-family:var(--f);pointer-events:none;opacity:0;transition:opacity .15s}.bc.show{opacity:1}
+@media(max-width:700px){.sb{width:100%;position:fixed;z-index:15;height:55dvh;bottom:0;left:0;border-right:none;border-top:1px solid var(--bdr);border-radius:16px 16px 0 0;transition:transform .25s}.sb.closed{transform:translateY(100%)}.sb.open{transform:translateY(0)}.tb{top:auto;bottom:10px}}
+</style>
+</head>
+<body>
+<div class="app">
+  <div class="sb" id="sb">
+    <div class="sb-h"><h1><span class="a">◈</span> OutlineCanvas <span class="badge ba">v2</span></h1><div class="sb-sub">UX redesign · bezier curves · zones · hover</div></div>
+    <div class="vs"><div class="vs-l">View</div><div class="vg" id="vg"></div><div class="vl" id="vl">Tree Chart</div></div>
+    <div class="es"><div class="vs-l" style="margin-bottom:6px">Outline</div><textarea id="ed" spellcheck="false"></textarea></div>
+    <div class="st" id="st"></div>
+  </div>
+  <button class="tb" id="tg" style="left:308px">◀</button>
+  <div class="ca">
+    <canvas id="cv"></canvas>
+    <div class="bc" id="bc"></div>
+    <div class="cc"><button class="cb" id="zi">+</button><button class="cb" id="zo">−</button><button class="cb" id="ft">⊞</button></div>
+  </div>
+</div>
+<script>
+const SAMPLE=`- Product Launch
+  - Research
+    - Market Analysis
+      - Competitor review
+      - Customer interviews
+    - Technical Feasibility
+      - API evaluation
+      - Performance benchmarks
+  - Design
+    - UX Research
+      - User flows
+      - Wireframes
+    - Visual Design
+      - Brand alignment
+      - Component library
+  - Development
+    - Frontend
+      - React components
+      - State management
+    - Backend
+      - API endpoints
+      - Database schema
+  - Launch
+    - Marketing
+      - Press release
+      - Social campaign
+    - Operations
+      - Monitoring setup
+      - Support training`;
+
+const COL=[
+  {f:'#3e63dd18',s:'#3e63dd',t:'#8da4ef',lf:'#3e63dd0c',ls:'#3e63dd35',zone:'#3e63dd08',dash:[8,4]},
+  {f:'#f7680018',s:'#f76800',t:'#ffa057',lf:'#f768000c',ls:'#f7680035',zone:'#f7680008',dash:[12,3]},
+  {f:'#6e56cf18',s:'#6e56cf',t:'#b4a3e8',lf:'#6e56cf0c',ls:'#6e56cf35',zone:'#6e56cf08',dash:[4,4]},
+  {f:'#00a2c718',s:'#00a2c7',t:'#6cd4e8',lf:'#00a2c70c',ls:'#00a2c735',zone:'#00a2c708',dash:[16,4]},
+  {f:'#e5484d18',s:'#e5484d',t:'#ff9592',lf:'#e5484d0c',ls:'#e5484d35',zone:'#e5484d08',dash:[6,2,2,2]},
+  {f:'#d6409f18',s:'#d6409f',t:'#ef8fcc',lf:'#d6409f0c',ls:'#d6409f35',zone:'#d6409f08',dash:[10,5]},
+  {f:'#46a75818',s:'#46a758',t:'#7ccf8e',lf:'#46a7580c',ls:'#46a75835',zone:'#46a75808',dash:[3,3]},
+  {f:'#ffe07018',s:'#ffe070',t:'#f5d56a',lf:'#ffe0700c',ls:'#ffe07035',zone:'#ffe07008',dash:[14,2,4,2]},
+];
+const cc=i=>COL[i%COL.length];
+
+// ─── PARSER ───
+function pL(l){const m=l.match(/^(\s*)-\s+(.*)/);return m?{indent:m[1].length,content:m[2].trim()}:null}
+function pT(text){const lines=text.split('\n').filter(l=>l.trim()),root={name:'root',children:[],depth:-1,indent:-1},stack=[root];let id=0;for(const line of lines){const p=pL(line);if(!p)continue;const n={name:p.content,children:[],depth:0,indent:p.indent,id:id++};while(stack.length>1&&stack[stack.length-1].indent>=p.indent)stack.pop();const par=stack[stack.length-1];n.depth=par.depth+1;par.children.push(n);stack.push(n)}return root.children.length===1?root.children[0]:{name:'root',children:root.children,depth:0,id:-1}}
+function cL(n){return n.children.length?n.children.reduce((s,c)=>s+cL(c),0):1}
+function flat(n,r=[]){r.push(n);n.children.forEach(c=>flat(c,r));return r}
+function mD(n,d=0){return n.children.length?Math.max(...n.children.map(c=>mD(c,d+1))):d}
+
+// ─── DRAW PRIMITIVES ───
+const FN='IBM Plex Mono,SF Mono,monospace';
+function rr(x,a,b,w,h,r=5){x.beginPath();x.moveTo(a+r,b);x.lineTo(a+w-r,b);x.quadraticCurveTo(a+w,b,a+w,b+r);x.lineTo(a+w,b+h-r);x.quadraticCurveTo(a+w,b+h,a+w-r,b+h);x.lineTo(a+r,b+h);x.quadraticCurveTo(a,b+h,a,b+h-r);x.lineTo(a,b+r);x.quadraticCurveTo(a,b,a+r,b);x.closePath()}
+function dB(x,a,b,w,h,fi,st,lw=1.5,rd=5,da=null){rr(x,a,b,w,h,rd);if(fi){x.fillStyle=fi;x.fill()}if(st){x.strokeStyle=st;x.lineWidth=lw;if(da)x.setLineDash(da);x.stroke();if(da)x.setLineDash([])}}
+function dT(x,text,a,b,o={}){const{color='#b0b4ba',size=12,weight='400',align='left',baseline='middle',maxWidth}=o;x.fillStyle=color;x.font=`${weight} ${size}px ${FN}`;x.textAlign=align;x.textBaseline=baseline;let t=text;if(maxWidth&&x.measureText(text).width>maxWidth){while(t.length>2&&x.measureText(t+'…').width>maxWidth)t=t.slice(0,-1);t+='…'}x.fillText(t,a,b)}
+function dL(x,x1,y1,x2,y2,co,lw=1.5,da=null){x.beginPath();x.strokeStyle=co;x.lineWidth=lw;x.setLineDash(da||[]);x.moveTo(x1,y1);x.lineTo(x2,y2);x.stroke();x.setLineDash([])}
+
+// ═══════════════════════════════════════════════
+// VIEW 1: TREE CHART
+// Improvements: bezier curves, background zones, depth-based sizing
+// ═══════════════════════════════════════════════
+function layTree(root){
+  const nW=185,nH=40,lW=175,lH=34,lGap=7,bGap=55
+  const bX=200,lX=bX+nW+70
+  const els=[]
+
+  // Root box with subtle glow effect
+  els.push({t:'box',x:25,y:25,w:150,h:50,fill:'#46a75818',stroke:'#46a758',lw:2.5,text:root.name,tc:'#edeef0',ts:15,tw:'700',rad:10})
+
+  let curY=115
+  const branchData=[] // collect positions for spine
+
+  root.children.forEach((b,bi)=>{
+    const c=cc(bi),kids=b.children
+    const kH=Math.max(kids.length,1)*(lH+lGap)-lGap
+    const blockH=Math.max(nH,kH)
+    const nY=curY+(blockH-nH)/2,mid=nY+nH/2
+    branchData.push({mid,curY,blockH,nY,c,bi})
+
+    // Background zone: subtle colored region with dashed border for accessibility
+    const zoneTop=curY-8
+    const zoneH=blockH+16
+    els.push({t:'box',x:bX-12,y:zoneTop,w:lX+lW-bX+24+12,h:zoneH,fill:c.zone,stroke:c.s+'20',lw:1,rad:10,da:c.dash})
+
+    // Branch box — slightly bigger for branches with more children
+    const scaledH=nH+Math.min(kids.length,4)*1.5
+    const adjNY=mid-scaledH/2
+    els.push({t:'box',x:bX,y:adjNY,w:nW,h:scaledH,fill:c.f,stroke:c.s,lw:1.5,text:`${bi+1}. ${b.name}`,tc:c.t,ts:12,tw:'600',rad:8})
+
+    // Bezier curves from branch right edge to each leaf left edge
+    if(kids.length){
+      const lStartY=curY+(blockH-kH)/2
+      kids.forEach((k,ki)=>{
+        const ly=lStartY+ki*(lH+lGap),lcy=ly+lH/2
+        // S-curve: exit branch right, arc to leaf left
+        const sx=bX+nW, sy=mid
+        const ex=lX, ey=lcy
+        const cpx=(sx+ex)/2
+        els.push({t:'curve',x1:sx,y1:sy,cx1:cpx,cy1:sy,cx2:cpx,cy2:ey,x2:ex,y2:ey,color:c.s+'50',lw:1.5})
+        // Leaf box — 44px min touch target height
+        els.push({t:'box',x:lX,y:ly,w:lW,h:lH,fill:c.lf,stroke:c.ls,lw:0.8,text:k.name,tc:'#a8a8b2',ts:12,rad:6,da:c.dash})
+      })
+    }
+    curY+=blockH+bGap
+  })
+
+  // Root→branches: bezier curves from root right edge to each branch left edge
+  const rootRX=25+150, rootCY=25+25
+  branchData.forEach(({mid,c,bi})=>{
+    const sx=rootRX, sy=rootCY
+    const ex=bX, ey=mid
+    const cpx=(sx+ex)/2
+    els.push({t:'curve',x1:sx,y1:sy,cx1:cpx,cy1:sy,cx2:cpx,cy2:ey,x2:ex,y2:ey,color:cc(bi).s+'60',lw:2})
+  })
+
+  return{elements:els,bounds:{x:0,y:0,w:lX+lW+40,h:curY+20}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 2: TREE TABLE
+// Improvements: alternating row stripes, semantic headers, row group highlighting
+// ═══════════════════════════════════════════════
+function layTable(root){
+  const els=[],md=mD(root),cW=185,rH=36,hH=40,p=12,tW=cW*md+p*2,rows=[]
+  
+  // Collect first node name at each depth for semantic headers
+  const depthNames=[]
+  function findNames(n,d){if(d>=md)return;if(!depthNames[d])depthNames[d]=n.name;n.children.forEach(c=>findNames(c,d+1))}
+  root.children.forEach(c=>findNames(c,0))
+
+  function walk(n,d){const sp=cL(n);if(!n.children.length){const r=[{text:n.name,span:1,depth:d,isLeaf:true}];for(let i=d+1;i<md;i++)r.push({text:'',span:1,depth:i,empty:true});rows.push(r)}else n.children.forEach((c,ci)=>{const b=rows.length;walk(c,d+1);if(ci===0)rows[b].unshift({text:n.name,span:sp,depth:d,isLeaf:false})})}
+  root.children.forEach(c=>walk(c,0))
+  const tH=hH+rows.length*rH+p
+
+  // Table background
+  els.push({t:'box',x:0,y:0,w:tW,h:tH,fill:'#111318',stroke:'#2b2d35',lw:1,rad:0})
+
+  // Column headers — semantic labels
+  const headerLabels=['Group','Category','Sub-category','Item','Detail','Attribute']
+  for(let d=0;d<md;d++){
+    els.push({t:'box',x:p+d*cW,y:0,w:cW,h:hH,fill:'#1a1d24',stroke:'#2b2d35',lw:0.5,rad:0})
+    const label=d<headerLabels.length?headerLabels[d]:`Level ${d+1}`
+    els.push({t:'text',text:label,x:p+d*cW+cW/2,y:hH/2,color:'#6f7380',size:10,weight:'600',align:'center'})
+  }
+  els.push({t:'line',x1:0,y1:hH,x2:tW,y2:hH,color:'#46a758',lw:2})
+
+  // Cells with alternating row stripes
+  const placed=Array.from({length:rows.length},()=>Array(md).fill(false))
+  rows.forEach((row,ri)=>{
+    // Alternating stripe background
+    if(ri%2===1){
+      els.push({t:'box',x:p,y:hH+ri*rH,w:tW-p*2,h:rH,fill:'#ffffff04',stroke:'transparent',lw:0,rad:0})
+    }
+    let ci=0
+    for(const cell of row){
+      while(ci<md&&placed[ri][ci])ci++;if(ci>=md)break
+      for(let s=0;s<cell.span;s++)if(ri+s<rows.length)placed[ri+s][ci]=true
+      if(!cell.empty){
+        const cx=p+ci*cW,cy=hH+ri*rH,ch=cell.span*rH,c=cc(cell.depth)
+        els.push({t:'box',x:cx+1,y:cy+1,w:cW-2,h:ch-2,fill:cell.isLeaf?'transparent':c.f,stroke:'#2b2d35',lw:0.5,rad:0})
+        if(!cell.isLeaf)els.push({t:'line',x1:cx+1,y1:cy+1,x2:cx+1,y2:cy+ch-2,color:c.s,lw:3})
+        els.push({t:'text',text:cell.text,x:cx+16,y:cy+ch/2,color:cell.isLeaf?'#6f7380':'#edeef0',size:cell.isLeaf?11:12,weight:cell.isLeaf?'400':'600',align:'left',maxWidth:cW-32})
+      }
+      ci++
+    }
+  })
+  return{elements:els,bounds:{x:0,y:0,w:tW,h:tH}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 3: TIMELINE
+// Improvements: Roadmap-card paradigm. Phase cards sit on/around the spine
+// and CONTAIN their children — no external connectors needed.
+// Two modes: "on" = all cards below spine, "off" = alternating above/below.
+// ═══════════════════════════════════════════════
+function layTL(root,off=true){
+  const els=[]
+  const br=root.children
+  const rW=150,rootH=52 // root box
+  const phaseW=180       // phase card width
+  const itemH=28         // child item height inside card
+  const itemGap=4        // gap between items
+  const itemPadTop=38    // space for phase header inside card
+  const itemPadBot=10
+  const phaseGap=40      // horizontal gap between phase cards
+  const spY=off?280:100  // spine Y
+
+  // Calculate each phase card's height based on child count
+  const phaseData=br.map((b,bi)=>{
+    const kids=b.children
+    const cardH=itemPadTop+kids.length*(itemH+itemGap)-itemGap+itemPadBot
+    return{b,bi,kids,cardH:Math.max(cardH,60)}
+  })
+
+  // Total width
+  const totalPhasesW=phaseData.length*(phaseW+phaseGap)-phaseGap
+  const startX=rW+80 // phases start after root
+
+  // Root box
+  els.push({t:'box',x:20,y:spY-rootH/2,w:rW,h:rootH,fill:'#46a75818',stroke:'#46a758',lw:2.5,text:root.name,tc:'#edeef0',ts:14,tw:'700',rad:10})
+
+  // Spine line: root right edge → past last phase
+  const spineEndX=startX+totalPhasesW+50
+  // Draw spine FIRST (behind everything)
+  els.push({t:'line',x1:20+rW,y1:spY,x2:spineEndX,y2:spY,color:'#46a75825',lw:3})
+
+  // Arrow at end
+  els.push({t:'line',x1:spineEndX-10,y1:spY-6,x2:spineEndX,y2:spY,color:'#46a75850',lw:2.5})
+  els.push({t:'line',x1:spineEndX-10,y1:spY+6,x2:spineEndX,y2:spY,color:'#46a75850',lw:2.5})
+
+  phaseData.forEach(({b,bi,kids,cardH},pi)=>{
+    const c=cc(bi)
+    const px=startX+pi*(phaseW+phaseGap)
+    const isAbove=off?(pi%2===0):false
+    const dir=isAbove?-1:1
+
+    // Card Y: sits above or below the spine with a small gap
+    const gapFromSpine=12
+    const cardY=isAbove?spY-gapFromSpine-cardH:spY+gapFromSpine
+
+    // Phase number dot on the spine
+    els.push({t:'dot',x:px+phaseW/2,y:spY,r:14,color:c.f})
+    els.push({t:'dot',x:px+phaseW/2,y:spY,r:12,color:'#0d0f14'})
+    els.push({t:'text',text:`${bi+1}`,x:px+phaseW/2,y:spY,color:c.s,size:12,weight:'700',align:'center'})
+
+    // Vertical connector: from spine dot to the card edge (short straight line)
+    const connStartY=isAbove?spY-14:spY+14
+    const connEndY=isAbove?cardY+cardH:cardY
+    els.push({t:'line',x1:px+phaseW/2,y1:connStartY,x2:px+phaseW/2,y2:connEndY,color:c.s+'50',lw:1.5})
+
+    // Phase card — contains the header and all children
+    els.push({t:'box',x:px,y:cardY,w:phaseW,h:cardH,fill:c.zone,stroke:c.s+'40',lw:1,rad:10})
+
+    // Phase header inside card
+    const headerY=isAbove?cardY+8:cardY+8
+    els.push({t:'box',x:px+6,y:headerY,w:phaseW-12,h:26,fill:c.f,stroke:c.s,lw:1,rad:6,text:b.name,tc:c.t,ts:12,tw:'600'})
+
+    // Chevron between phases (on spine)
+    if(pi<phaseData.length-1){
+      const nextPx=startX+(pi+1)*(phaseW+phaseGap)
+      const mx=(px+phaseW+nextPx)/2
+      els.push({t:'line',x1:mx-4,y1:spY-4,x2:mx+3,y2:spY,color:'#46a75845',lw:1.5})
+      els.push({t:'line',x1:mx-4,y1:spY+4,x2:mx+3,y2:spY,color:'#46a75845',lw:1.5})
+    }
+
+    // Children listed inside the card
+    kids.forEach((k,ki)=>{
+      const iy=headerY+30+ki*(itemH+itemGap)
+      els.push({t:'box',x:px+8,y:iy,w:phaseW-16,h:itemH,fill:c.lf,stroke:c.ls,lw:0.7,rad:5,text:k.name,tc:'#a8a8b2',ts:12,da:c.dash})
+    })
+  })
+
+  // Calculate bounds
+  const maxCardH=Math.max(...phaseData.map(d=>d.cardH))
+  const boundsTop=off?spY-12-maxCardH-30:spY-rootH/2-20
+  const boundsBot=off?spY+12+maxCardH+30:spY+12+maxCardH+30
+  return{elements:els,bounds:{x:0,y:boundsTop,w:spineEndX+40,h:boundsBot-boundsTop}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 4: MIND MAP
+// Improvements: TRUE mind map — branches radiate LEFT and RIGHT from central root.
+// Top-half branches go right, bottom-half go left. Bezier curves everywhere.
+// ═══════════════════════════════════════════════
+function layMind(root){
+  const els=[]
+  const rootW=200,rootH=60,rootRad=14
+  const brGap=24, lfGap=6
+  const br=root.children
+  const lfH=32, lfW=155
+
+  // Split branches: first half goes right, second half goes left
+  const rightBr=br.slice(0,Math.ceil(br.length/2))
+  const leftBr=br.slice(Math.ceil(br.length/2))
+
+  // Branch sizing scaled by child count
+  const brSize=b=>({w:180+Math.min(b.children.length,5)*5,h:44+Math.min(b.children.length,5)*2})
+
+  // Layout dimensions
+  const colGap=180 // gap between root edge and branch column
+  const lfColGap=55 // gap between branch edge and leaf column
+
+  // Calculate vertical extent for each side
+  function sideHeight(list){return list.reduce((s,b)=>s+brSize(b).h,0)+(list.length-1)*brGap}
+  const rightH=sideHeight(rightBr), leftH=sideHeight(leftBr)
+  const maxH=Math.max(rightH,leftH,rootH)
+
+  // Center everything vertically
+  const centerY=50+maxH/2
+  const rootCx=500, rootCy=centerY
+
+  // Root glow
+  els.push({t:'dot',x:rootCx,y:rootCy,r:60,color:'#46a75808'})
+  els.push({t:'dot',x:rootCx,y:rootCy,r:45,color:'#46a75810'})
+
+  // Root box centered
+  els.push({t:'box',x:rootCx-rootW/2,y:rootCy-rootH/2,w:rootW,h:rootH,fill:'#1a1d2480',stroke:'#46a758',lw:2.5,text:root.name,tc:'#edeef0',ts:16,tw:'700',rad:rootRad})
+
+  // Render branches on one side
+  function renderSide(list,isRight,startIndex){
+    const totalH=sideHeight(list)
+    let curY=centerY-totalH/2
+
+    list.forEach((b,i)=>{
+      const bi=startIndex+i
+      const c=cc(bi)
+      const{w:brW,h:brH}=brSize(b)
+      const brCy=curY+brH/2
+
+      // Branch X position
+      const brX=isRight?rootCx+rootW/2+colGap:rootCx-rootW/2-colGap-brW
+      // Leaf X position
+      const lfX=isRight?brX+brW+lfColGap:brX-lfColGap-lfW
+
+      // Bezier: root edge → branch edge
+      const sx=isRight?rootCx+rootW/2:rootCx-rootW/2
+      const ex=isRight?brX:brX+brW
+      const cpx=(sx+ex)/2
+      els.push({t:'curve',x1:sx,y1:rootCy,cx1:cpx,cy1:rootCy,cx2:cpx,cy2:brCy,x2:ex,y2:brCy,color:c.s+'80',lw:2.2})
+
+      // Branch box
+      els.push({t:'box',x:brX,y:curY,w:brW,h:brH,fill:c.f,stroke:c.s,lw:1.5,text:b.name,tc:c.t,ts:12,tw:'600',rad:8})
+
+      // Leaves with bezier curves
+      if(b.children.length){
+        const kids=b.children
+        const kidsH=kids.length*lfH+(kids.length-1)*lfGap
+        const kidsStartY=brCy-kidsH/2
+
+        kids.forEach((k,ki)=>{
+          const ly=kidsStartY+ki*(lfH+lfGap)
+          const lcy=ly+lfH/2
+          // Bezier from branch outer edge to leaf inner edge
+          const sx2=isRight?brX+brW:brX
+          const ex2=isRight?lfX:lfX+lfW
+          const cpx2=(sx2+ex2)/2
+          els.push({t:'curve',x1:sx2,y1:brCy,cx1:cpx2,cy1:brCy,cx2:cpx2,cy2:lcy,x2:ex2,y2:lcy,color:c.s+'40',lw:1.3})
+          els.push({t:'box',x:lfX,y:ly,w:lfW,h:lfH,fill:c.lf,stroke:c.ls,lw:0.8,text:k.name,tc:'#a8a8b2',ts:12,rad:6,da:c.dash})
+        })
+      }
+      curY+=brH+brGap
+    })
+    return curY
+  }
+
+  renderSide(rightBr,true,0)
+  renderSide(leftBr,false,rightBr.length)
+
+  // Calculate bounds
+  const leftEdge=rootCx-rootW/2-colGap-200-lfColGap-lfW
+  const rightEdge=rootCx+rootW/2+colGap+200+lfColGap+lfW
+  return{elements:els,bounds:{x:Math.min(leftEdge-30,0),y:0,w:rightEdge-Math.min(leftEdge-30,0)+40,h:maxH+100}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 4b: RIGHT TREE
+// Root on the left, ALL branches stacked to the right, leaves further right.
+// Bezier curves for all connections. Like a classic org chart flowing left→right.
+// ═══════════════════════════════════════════════
+function layRightTree(root){
+  const els=[]
+  const rootW=200,rootH=60,rootX=40,rootRad=14
+  const brGap=24, lfGap=6
+  const br=root.children
+  const lfH=32, lfW=155
+
+  // Branch sizing scaled by child count
+  const brSize=b=>({w:185+Math.min(b.children.length,5)*5,h:44+Math.min(b.children.length,5)*2})
+
+  // Calculate total branch height
+  const totalBrH=br.reduce((s,b)=>s+brSize(b).h,0)+(br.length-1)*brGap
+  const startY=40
+  const rootCy=startY+totalBrH/2
+
+  // Root glow
+  els.push({t:'dot',x:rootX+rootW/2,y:rootCy,r:60,color:'#46a75808'})
+  els.push({t:'dot',x:rootX+rootW/2,y:rootCy,r:45,color:'#46a75810'})
+
+  // Root box
+  els.push({t:'box',x:rootX,y:rootCy-rootH/2,w:rootW,h:rootH,fill:'#1a1d2480',stroke:'#46a758',lw:2.5,text:root.name,tc:'#edeef0',ts:16,tw:'700',rad:rootRad})
+
+  const colGap=170  // gap between root right edge and branch column
+  const lfColGap=55 // gap between branch right edge and leaf column
+  const brX=rootX+rootW+colGap
+  let curY=startY
+
+  br.forEach((b,bi)=>{
+    const c=cc(bi)
+    const{w:brW,h:brH}=brSize(b)
+    const brCy=curY+brH/2
+
+    // Bezier: root right edge → branch left edge
+    const sx=rootX+rootW, sy=rootCy
+    const ex=brX, ey=brCy
+    const cpx=(sx+ex)/2
+    els.push({t:'curve',x1:sx,y1:sy,cx1:cpx,cy1:sy,cx2:cpx,cy2:ey,x2:ex,y2:ey,color:c.s+'80',lw:2.2})
+
+    // Branch box
+    els.push({t:'box',x:brX,y:curY,w:brW,h:brH,fill:c.f,stroke:c.s,lw:1.5,text:b.name,tc:c.t,ts:12,tw:'600',rad:8})
+
+    // Leaves with bezier curves
+    if(b.children.length){
+      const kids=b.children
+      const kidsH=kids.length*lfH+(kids.length-1)*lfGap
+      const kidsStartY=brCy-kidsH/2
+      const lfX=brX+brW+lfColGap
+
+      kids.forEach((k,ki)=>{
+        const ly=kidsStartY+ki*(lfH+lfGap)
+        const lcy=ly+lfH/2
+        // Bezier from branch right edge to leaf left edge
+        const sx2=brX+brW, sy2=brCy
+        const ex2=lfX, ey2=lcy
+        const cpx2=(sx2+ex2)/2
+        els.push({t:'curve',x1:sx2,y1:sy2,cx1:cpx2,cy1:sy2,cx2:cpx2,cy2:ey2,x2:ex2,y2:ey2,color:c.s+'40',lw:1.3})
+        els.push({t:'box',x:lfX,y:ly,w:lfW,h:lfH,fill:c.lf,stroke:c.ls,lw:0.8,text:k.name,tc:'#a8a8b2',ts:12,rad:6,da:c.dash})
+      })
+    }
+    curY+=brH+brGap
+  })
+
+  const maxBrW=Math.max(...br.map(b=>brSize(b).w))
+  return{elements:els,bounds:{x:0,y:0,w:brX+maxBrW+lfColGap+lfW+40,h:totalBrH+80}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 5: FISHBONE
+// Improvements: angled bones (60°), sub-bones in boxes,
+// head box instead of bare text
+// ═══════════════════════════════════════════════
+function layFish(root){
+  const els=[],br=root.children,spacing=220,boneLen=130,spY=300
+  const hX=100+br.length*spacing+60
+  const headW=180,headH=50
+
+  // Spine
+  els.push({t:'line',x1:40,y1:spY,x2:hX,y2:spY,color:'#46a758',lw:2.5})
+
+  // Head box (instead of bare text)
+  els.push({t:'box',x:hX,y:spY-headH/2,w:headW,h:headH,fill:'#46a75818',stroke:'#46a758',lw:2,text:root.name,tc:'#edeef0',ts:14,tw:'700',rad:8})
+
+  br.forEach((b,bi)=>{
+    const c=cc(bi),boneX=120+bi*spacing
+    const isT=bi%2===0,dir=isT?-1:1
+    // Angled bone at ~60° instead of vertical
+    const angleX=boneLen*0.5 // horizontal component
+    const angleY=boneLen      // vertical component
+    const endX=boneX+dir*0*angleX // keep vertical for simplicity of sub-bone alignment
+    const endY=spY+dir*angleY
+
+    // Bone line (angled slightly)
+    els.push({t:'line',x1:boneX,y1:spY,x2:boneX+angleX*0.3,y2:endY,color:c.s,lw:2})
+
+    // Branch label in a box (instead of bare text)
+    const labelW=140,labelH=36
+    const labelX=boneX+angleX*0.3-labelW/2
+    const labelY=endY+dir*8+(isT?-labelH:0)
+    els.push({t:'box',x:labelX,y:labelY,w:labelW,h:labelH,fill:c.f,stroke:c.s,lw:1.5,text:b.name,tc:c.t,ts:11,tw:'600',rad:6})
+
+    // Sub-bones in boxes — wider spacing to avoid collisions
+    b.children.forEach((k,ki)=>{
+      const subY=spY+dir*(22+ki*36)
+      const subBoneAngle=0.6
+      const subX=boneX+(ki%2===0?-1:1)*90
+      els.push({t:'line',x1:boneX+angleX*0.15*(ki+1)/(b.children.length+1),y1:subY,x2:subX,y2:subY+dir*14,color:c.s+'45',lw:1})
+      const subW=120,subH=28
+      els.push({t:'box',x:subX-subW/2,y:subY+dir*14+(isT?-subH-2:2),w:subW,h:subH,fill:c.lf,stroke:c.ls,lw:0.8,text:k.name,tc:'#a8a8b2',ts:12,rad:4,da:c.dash})
+    })
+  })
+  const mL=Math.max(...br.map(b=>b.children.length),0)
+  return{elements:els,bounds:{x:0,y:spY-boneLen-40-mL*36-50,w:hX+headW+40,h:(boneLen+40+mL*36+50)*2+headH}}
+}
+
+// ═══════════════════════════════════════════════
+// VIEW 6: TREEMAP
+// Improvements: inner padding, sequential color ramp within branches,
+// hover hitboxes stored for breadcrumb
+// ═══════════════════════════════════════════════
+const treemapHitBoxes=[] // stored for hover breadcrumb
+function layMap(root){
+  const els=[],W=900,H=580
+  treemapHitBoxes.length=0
+  function cA(n){return 1+n.children.reduce((s,c)=>s+cA(c),0)}
+  
+  function sq(n,x,y,w,h,d,path){
+    const fullPath=[...path,n.name]
+    if(!n.children.length){
+      const baseC=cc(d)
+      // Leaf: dash pattern on border for color-blind accessibility
+      els.push({t:'box',x:x+1,y:y+1,w:w-3,h:h-3,fill:baseC.lf,stroke:baseC.ls,lw:0.8,rad:4,da:baseC.dash})
+      // Fix: min 12px, brighter color #a8a8b2 for WCAG 4.5:1 contrast
+      if(w>32&&h>14)els.push({t:'text',text:n.name,x:x+8,y:y+(h-2)/2,color:'#a8a8b2',size:Math.max(12,Math.min(13,h/2.2)),align:'left',maxWidth:w-16})
+      treemapHitBoxes.push({x:x+1,y:y+1,w:w-3,h:h-3,path:fullPath})
+      return
+    }
+    const c=cc(d)
+    els.push({t:'box',x,y,w:w-1,h:h-1,fill:c.f,stroke:c.s,lw:d<2?1.5:1,rad:4})
+    const minLabelW=d<2?30:55
+    if(w>minLabelW){
+      const labelSize=d<2?Math.min(13,w/10):12
+      els.push({t:'text',text:n.name,x:x+8,y:y+13,color:c.t,size:labelSize,weight:'700',align:'left',maxWidth:w-16})
+    }
+    treemapHitBoxes.push({x,y,w:w-1,h:h-1,path:fullPath})
+
+    // Inner padding (visible gap between parent border and children)
+    const padTop=24, padSide=4, padBot=4
+    const tot=n.children.reduce((s,c2)=>s+cA(c2),0)
+    let off=0
+    const iX=x+padSide, iY=y+padTop, iW=w-padSide*2-1, iH=h-padTop-padBot-1
+    const hz=iW>=iH
+    n.children.forEach(ch=>{
+      const r=cA(ch)/tot
+      sq(ch,hz?iX+off:iX,hz?iY:iY+off,hz?iW*r:iW,hz?iH:iH*r,d+1,fullPath)
+      off+=hz?iW*r:iH*r
+    })
+  }
+  sq(root,0,0,W,H,0,[])
+  return{elements:els,bounds:{x:-10,y:-10,w:W+20,h:H+20}}
+}
+
+// ─── RENDER ───
+function render(ctx,els){els.forEach(el=>{switch(el.t){
+  case'box':dB(ctx,el.x,el.y,el.w,el.h,el.fill,el.stroke,el.lw,el.rad,el.da);if(el.text)dT(ctx,el.text,el.x+el.w/2,el.y+el.h/2,{color:el.tc,size:el.ts,weight:el.tw,align:'center',maxWidth:el.w-16});break;
+  case'line':dL(ctx,el.x1,el.y1,el.x2,el.y2,el.color,el.lw,el.dash);break;
+  case'curve':ctx.beginPath();ctx.strokeStyle=el.color;ctx.lineWidth=el.lw||1.5;ctx.moveTo(el.x1,el.y1);ctx.bezierCurveTo(el.cx1,el.cy1,el.cx2,el.cy2,el.x2,el.y2);ctx.stroke();break;
+  case'text':dT(ctx,el.text,el.x,el.y,el);break;
+  case'dot':ctx.beginPath();ctx.arc(el.x,el.y,el.r,0,Math.PI*2);ctx.fillStyle=el.color;ctx.fill();break;
+  case'ellipse':ctx.beginPath();ctx.ellipse(el.x,el.y,el.rx,el.ry,0,0,Math.PI*2);if(el.fill){ctx.fillStyle=el.fill;ctx.fill()}if(el.stroke){ctx.strokeStyle=el.stroke;ctx.lineWidth=el.lw||1;ctx.stroke()}break;
+}})}
+
+// ─── VIEWS ───
+const VIEWS=[
+  {id:'tree',label:'Tree Chart',icon:'⎅',fn:layTree},
+  {id:'table',label:'Tree Table',icon:'⊟',fn:layTable},
+  {id:'tl_off',label:'Roadmap ↕',icon:'⟿',fn:d=>layTL(d,true)},
+  {id:'tl_on',label:'Roadmap →',icon:'→',fn:d=>layTL(d,false)},
+  {id:'mind',label:'Mind Map',icon:'◎',fn:layMind},
+  {id:'rtree',label:'Right Tree',icon:'⊳',fn:layRightTree},
+  {id:'fish',label:'Fishbone',icon:'⟜',fn:layFish},
+  {id:'tmap',label:'Treemap',icon:'▦',fn:layMap},
+];
+
+let av='tree',so=true,cl=null;
+const pan={x:0,y:0,z:1,d:false,lx:0,ly:0};
+const cv=document.getElementById('cv'),ctx=cv.getContext('2d'),ed=document.getElementById('ed');ed.value=SAMPLE;
+const bcEl=document.getElementById('bc')
+
+const vg=document.getElementById('vg');
+VIEWS.forEach(v=>{const b=document.createElement('button');b.className='vb'+(v.id===av?' on':'');b.dataset.id=v.id;b.innerHTML=`<span class="i">${v.icon}</span>${v.label}`;b.onclick=()=>sw(v.id);vg.appendChild(b)});
+
+function sw(id){av=id;document.querySelectorAll('.vb').forEach(b=>b.classList.toggle('on',b.dataset.id===id));document.getElementById('vl').textContent=VIEWS.find(v=>v.id===id).label;bcEl.classList.remove('show');
+  // Fade animation on view switch
+  cv.classList.add('fading');setTimeout(()=>{rb();cv.classList.remove('fading')},180)}
+
+function draw(){
+  const dpr=window.devicePixelRatio||1,rect=cv.getBoundingClientRect();
+  cv.width=rect.width*dpr;cv.height=rect.height*dpr;ctx.scale(dpr,dpr);
+  ctx.fillStyle='#0d0f14';ctx.fillRect(0,0,rect.width,rect.height);
+  if(!cl)return;ctx.save();ctx.translate(pan.x,pan.y);ctx.scale(pan.z,pan.z);render(ctx,cl.elements);ctx.restore();
+  dT(ctx,`${Math.round(pan.z*100)}%`,rect.width-12,rect.height-12,{color:'#ffffff20',size:10,align:'right',baseline:'bottom'})
+}
+
+function ftv(){if(!cl)return;const r=cv.getBoundingClientRect(),b=cl.bounds;pan.z=Math.min((r.width-80)/b.w,(r.height-80)/b.h,2);pan.x=(r.width-b.w*pan.z)/2-b.x*pan.z;pan.y=(r.height-b.h*pan.z)/2-b.y*pan.z;draw()}
+
+function rb(){const t=ed.value;try{const tree=pT(t);const v=VIEWS.find(v=>v.id===av);cl=v.fn(tree);const all=flat(tree);document.getElementById('st').innerHTML=`<span class="badge bo">${all.length} nodes</span><span class="badge bo">${all.filter(n=>!n.children.length).length} leaves</span><span class="badge bo">depth ${mD(tree)}</span>`;ftv()}catch(e){cl=null;draw()}}
+
+// ─── EVENTS ───
+ed.addEventListener('input',rb);
+cv.addEventListener('wheel',e=>{e.preventDefault();const r=cv.getBoundingClientRect(),mx=e.clientX-r.left,my=e.clientY-r.top,f=e.deltaY<0?1.08:.92,nz=Math.max(.05,Math.min(10,pan.z*f));pan.x=mx-(mx-pan.x)*(nz/pan.z);pan.y=my-(my-pan.y)*(nz/pan.z);pan.z=nz;draw()},{passive:false});
+cv.addEventListener('pointerdown',e=>{pan.d=true;pan.lx=e.clientX;pan.ly=e.clientY;cv.setPointerCapture(e.pointerId)});
+cv.addEventListener('pointermove',e=>{
+  if(pan.d){pan.x+=e.clientX-pan.lx;pan.y+=e.clientY-pan.ly;pan.lx=e.clientX;pan.ly=e.clientY;draw();return}
+  // Treemap hover breadcrumb
+  if(av==='tmap'&&treemapHitBoxes.length){
+    const r=cv.getBoundingClientRect()
+    const mx=(e.clientX-r.left-pan.x)/pan.z
+    const my=(e.clientY-r.top-pan.y)/pan.z
+    let found=null
+    // Find deepest (smallest) hit box
+    for(let i=treemapHitBoxes.length-1;i>=0;i--){
+      const h=treemapHitBoxes[i]
+      if(mx>=h.x&&mx<=h.x+h.w&&my>=h.y&&my<=h.y+h.h){found=h;break}
+    }
+    if(found){bcEl.textContent=found.path.join(' → ');bcEl.classList.add('show')}
+    else{bcEl.classList.remove('show')}
+  } else {bcEl.classList.remove('show')}
+});
+cv.addEventListener('pointerup',e=>{pan.d=false;cv.releasePointerCapture(e.pointerId)});
+document.getElementById('zi').onclick=()=>{pan.z*=1.2;draw()};
+document.getElementById('zo').onclick=()=>{pan.z*=.8;draw()};
+document.getElementById('ft').onclick=ftv;
+
+const tg=document.getElementById('tg'),sb=document.getElementById('sb');
+tg.onclick=()=>{so=!so;sb.classList.toggle('closed',!so);sb.classList.toggle('open',so);tg.textContent=so?'◀':'▶';tg.style.left=so?'308px':'8px';setTimeout(draw,250)};
+window.addEventListener('resize',draw);rb();
+</script>
+</body>
+</html>

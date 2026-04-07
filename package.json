@@ -1,0 +1,25 @@
+{
+  "name": "logseq-plugin-outline-canvas",
+  "version": "0.1.0",
+  "description": "Renders hierarchical block trees as interactive visual diagrams using Canvas2D",
+  "main": "dist/index.html",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {
+    "@logseq/libs": "^0.0.17",
+    "typescript": "^5.0.0",
+    "vite": "^5.0.0"
+  },
+  "logseq": {
+    "id": "outline-canvas",
+    "title": "OutlineCanvas — Visual Outline Diagrams",
+    "icon": "./icon.png",
+    "main": "dist/index.html",
+    "unsupportedGraphType": "file"
+  },
+  "license": "MIT"
+}
