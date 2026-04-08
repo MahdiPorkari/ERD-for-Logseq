@@ -544,14 +544,20 @@ The plugin development task is to decompose this monolithic HTML into the modula
 
 ---
 
-## 15. Open Questions
+## 15. Resolved Questions
 
-1. **Right sidebar vs. full-screen overlay?** The plugin could open in Logseq's right sidebar (consistent with other panels) or as a full-screen modal (more canvas space). Recommendation: start with right sidebar, add a "maximize" button that switches to full-screen.
+1. **Right sidebar vs. full-screen overlay?** ✅ RESOLVED — Both modes implemented. Default is docked to the right sidebar (overlays `#right-sidebar-container`, opens Logseq's sidebar for natural layout reflow). Toggle button switches to full-screen overlay. `Cmd+Shift+O` toggles between modes when already open.
 
-2. **Depth 3+ rendering strategy.** Should the plugin show a "drill down" interaction where clicking a depth-2 leaf re-roots the visualization on that branch? This would allow navigating arbitrarily deep outlines without information overload.
+2. **Depth 3+ rendering strategy.** ✅ RESOLVED — Two configurable modes via `depthMode` setting: "recursive" renders each depth level as independent connected nodes with bezier curves (Tree Chart, Right Tree, Mind Map rewritten as recursive layout engines); "flat" collapses deeper levels into breadcrumb-style leaf labels (e.g., "A > B > C"). `maxDepth` setting controls how deep to render (default 3).
 
-3. **Export capabilities.** Should the plugin support exporting the current view as PNG, SVG, or Mermaid code block? This could be a v1.1 feature — the Canvas2D `toDataURL()` method makes PNG export trivial.
+3. **Export capabilities.** Deferred to v1.1. PNG export is trivial via `canvas.toDataURL()` which is already used by the inline macro renderer.
 
-4. **Theme integration.** Should the plugin read Logseq's current theme colors and adapt its palette? The current design uses a fixed dark palette that matches Logseq's default dark theme. Supporting light themes would require a secondary palette.
+4. **Theme integration.** ✅ RESOLVED — Full light and dark theme support. Theme detected at startup via `getUserConfigs().preferredThemeMode`, live-switches on `onThemeModeChanged`. Separate dark/light `BranchColor` palettes with WCAG-safe contrast. UI CSS variables swap between `.oc-dark` and `.oc-light` classes.
 
-5. **Block-level rendering trigger.** Should the plugin also support rendering inline within a page (e.g., via a `{{renderer :outline-canvas}}` macro)? This would allow embedding diagrams directly in notes but adds significant complexity.
+5. **Block-level rendering trigger.** ✅ RESOLVED — `{{renderer :outline-canvas}}` macro renders a static PNG diagram inline. Supports optional view argument: `{{renderer :outline-canvas, mind}}`. Clicking the inline image opens the full interactive overlay. `/outline-canvas` slash command inserts the macro. Works in right sidebar slots.
+
+## 16. Open Questions
+
+1. **Drill-down navigation.** Should clicking a node re-root the visualization on that subtree? Would allow navigating arbitrarily deep outlines without information overload.
+
+2. **Export capabilities.** PNG export via `toDataURL()` is ready to implement. Should we also support SVG or Mermaid code block export?

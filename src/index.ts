@@ -52,7 +52,7 @@ function redraw(): void {
 function rebuildLayout(): void {
   if (!currentTree) return;
   const settings = getSettings();
-  const tree = flattenDeep(currentTree, settings.maxDepth);
+  const tree = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
   const view = VIEWS.find((v) => v.id === activeView)!;
   const result = view.layout(tree, settings.maxDepth);
   currentElements = result.elements;
@@ -94,19 +94,66 @@ function switchView(viewId: ViewId): void {
 
 // --- Dock / Full-screen mode ---
 
-function applyDockMode(): void {
+let sidebarWasOpen = false;
+
+function setDockedStyle(): void {
+  // Position iframe on the right, immediately visible
+  logseq.setMainUIInlineStyle({
+    position: "fixed",
+    zIndex: "999",
+    top: "0",
+    right: "0",
+    left: "auto",
+    width: "40vw",
+    height: "100vh",
+    borderLeft: "none",
+  });
+
+  // Try to match the sidebar container's exact bounds
+  try {
+    const sidebar = parent.document.getElementById("right-sidebar-container");
+    if (sidebar && sidebar.offsetWidth > 50) {
+      const rect = sidebar.getBoundingClientRect();
+      logseq.setMainUIInlineStyle({
+        position: "fixed",
+        zIndex: "999",
+        top: `${Math.round(rect.top)}px`,
+        left: `${Math.round(rect.left)}px`,
+        right: "auto",
+        width: `${Math.round(rect.width)}px`,
+        height: `${Math.round(rect.height)}px`,
+        borderLeft: "none",
+      });
+    }
+  } catch {
+    // Fallback to 40vw already set above
+  }
+}
+
+async function applyDockMode(): Promise<void> {
   if (isDocked) {
-    logseq.setMainUIInlineStyle({
-      position: "fixed",
-      zIndex: "999",
-      top: "0",
-      right: "0",
-      left: "auto",
-      width: "42%",
-      height: "100vh",
-      borderLeft: "1px solid var(--ls-border-color, #333)",
-    });
+    // Remember if sidebar was already open
+    sidebarWasOpen = await isSidebarOpen();
+
+    // Open Logseq's right sidebar so the app layout makes room
+    logseq.App.setRightSidebarVisible(true);
+
+    // Hide sidebar content so our canvas shows instead
+    try {
+      const sc = parent.document.getElementById("right-sidebar-container");
+      sc?.classList.add("oc-sidebar-hidden");
+    } catch { /* cross-origin safety */ }
+
+    // Set initial position immediately (visible right away)
+    setDockedStyle();
+
+    // Refine position after sidebar finishes opening
+    setTimeout(() => {
+      setDockedStyle();
+      if (currentTree) rebuildLayout();
+    }, 300);
   } else {
+    // Full-screen mode
     logseq.setMainUIInlineStyle({
       position: "fixed",
       zIndex: "999",
@@ -117,12 +164,35 @@ function applyDockMode(): void {
       height: "100vh",
       borderLeft: "none",
     });
+    // Restore sidebar content
+    try {
+      const sc = parent.document.getElementById("right-sidebar-container");
+      sc?.classList.remove("oc-sidebar-hidden");
+    } catch { /* cross-origin safety */ }
   }
   updateDockButton(isDocked);
-  // Recalculate layout after resize
   setTimeout(() => {
     if (currentTree) rebuildLayout();
-  }, 50);
+  }, 100);
+}
+
+async function isSidebarOpen(): Promise<boolean> {
+  try {
+    const sidebar = parent.document.getElementById("right-sidebar-container");
+    return sidebar !== null && sidebar.offsetWidth > 0;
+  } catch {
+    return false;
+  }
+}
+
+function hideCanvas(): void {
+  logseq.hideMainUI({ restoreEditingCursor: true });
+  // Restore sidebar
+  const sidebarContainer = parent.document.getElementById("right-sidebar-container");
+  sidebarContainer?.classList.remove("oc-sidebar-hidden");
+  if (isDocked && !sidebarWasOpen) {
+    logseq.App.setRightSidebarVisible(false);
+  }
 }
 
 function toggleDockMode(): void {
@@ -212,7 +282,7 @@ function setupCanvas(): void {
 
   // Close button
   document.getElementById("oc-close")?.addEventListener("click", () => {
-    logseq.hideMainUI({ restoreEditingCursor: true });
+    hideCanvas();
   });
 
   // Dock toggle button
@@ -286,6 +356,10 @@ async function main(): Promise<void> {
       display: flex;
       align-items: center;
     }
+    /* Hide sidebar content when canvas is docked over it */
+    .oc-sidebar-hidden #right-sidebar {
+      visibility: hidden;
+    }
     .outline-canvas-inline {
       width: 100%;
       padding: 8px 0;
@@ -330,15 +404,15 @@ async function main(): Promise<void> {
   // Model for click handlers
   logseq.provideModel({
     async openOutlineCanvas() {
+      await applyDockMode();
       logseq.showMainUI({ autoFocus: true });
-      applyDockMode();
       await loadTree();
     },
     async openOutlineCanvasForBlock(e: { dataset: Record<string, string> }) {
       const uuid = e.dataset.blockUuid;
       if (uuid) {
+        await applyDockMode();
         logseq.showMainUI({ autoFocus: true });
-        applyDockMode();
         await loadTree(uuid);
       }
     },
@@ -369,8 +443,8 @@ async function main(): Promise<void> {
         // Toggle dock/full when already open
         toggleDockMode();
       } else {
+        await applyDockMode();
         logseq.showMainUI({ autoFocus: true });
-        applyDockMode();
         await loadTree();
       }
     }
@@ -379,8 +453,8 @@ async function main(): Promise<void> {
   // Slash command — opens focused on current block (interactive overlay)
   logseq.Editor.registerSlashCommand("outline", async () => {
     const block = await logseq.Editor.getCurrentBlock();
+    await applyDockMode();
     logseq.showMainUI({ autoFocus: true });
-    applyDockMode();
     if (block) {
       await loadTree(block.uuid);
     } else {
@@ -426,7 +500,7 @@ async function main(): Promise<void> {
         (block as Record<string, unknown>).content as string ?? "Outline",
         settings.showEmptyBlocks
       );
-      const flattened = flattenDeep(tree, settings.maxDepth);
+      const flattened = flattenDeep(tree, settings.maxDepth, settings.depthMode);
 
       // Render to image
       const dataURL = renderToDataURL(flattened, viewId, settings.maxDepth, 800, 450);
@@ -458,7 +532,7 @@ async function main(): Promise<void> {
   // Close on Escape
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
-      logseq.hideMainUI({ restoreEditingCursor: true });
+      hideCanvas();
     }
     if (e.key === "0" && !e.ctrlKey && !e.metaKey && document.activeElement?.tagName === "CANVAS") {
       rebuildLayout();
@@ -470,7 +544,7 @@ async function main(): Promise<void> {
     if (isDocked) return; // don't close on click-outside in docked mode
     const target = e.target as HTMLElement;
     if (!target.closest(".oc-root")) {
-      logseq.hideMainUI({ restoreEditingCursor: true });
+      hideCanvas();
     }
   });
 

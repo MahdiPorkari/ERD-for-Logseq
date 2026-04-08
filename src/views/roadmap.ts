@@ -12,9 +12,9 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
 
   // Compute per-phase adaptive widths
   const phaseWidths = br.map((b) => {
-    const headerW = adaptiveWidth(b.name, basePhaseW, 12, 600, 320);
+    const headerW = adaptiveWidth(b.name, basePhaseW, 12, 600);
     const childW = b.children.length > 0
-      ? Math.max(...b.children.map((k) => adaptiveWidth(k.name, basePhaseW - 16, 12, 400, 304))) + 16
+      ? Math.max(...b.children.map((k) => adaptiveWidth(k.name, basePhaseW - 16, 12, 400))) + 16
       : 0;
     return Math.max(basePhaseW, headerW, childW);
   });

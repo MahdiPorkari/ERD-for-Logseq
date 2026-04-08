@@ -2,104 +2,109 @@ import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight, adaptiveWidth } from "../text";
 
-/** Tree Chart: Root top-left, vertical spine, branches right with bezier S-curves */
+const NODE_GAP = 12;
+const COL_GAP = 70;
+const ZONE_PAD = 8;
+const MIN_W = 175;
+
+function nodeSize(n: TreeNode): { w: number; h: number } {
+  const isRoot = n.depth === 0;
+  const fontSize = isRoot ? 15 : 12;
+  const fontWeight = isRoot ? 700 : 600;
+  const baseW = isRoot ? 150 : MIN_W;
+  const w = adaptiveWidth(n.name, baseW, fontSize, fontWeight);
+  const h = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 50 : 34);
+  return { w, h };
+}
+
+function subtreeHeight(node: TreeNode): number {
+  if (!node.children.length) return nodeSize(node).h;
+  const childrenH = node.children.reduce((s, c) => s + subtreeHeight(c), 0)
+    + (node.children.length - 1) * NODE_GAP;
+  return Math.max(nodeSize(node).h, childrenH);
+}
+
+/** Tree Chart: recursive layout with root top-left, branches flowing right */
 export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult {
-  const baseLW = 175, lGap = 7, bGap = 55;
-  const bX = 200;
   const els: RenderElement[] = [];
+  let maxX = 0;
 
-  // Root box
-  const rootH = measureBoxHeight(root.name, 150, 15, 700, 50);
-  els.push({
-    type: "box", x: 25, y: 25, w: 150, h: rootH,
-    fill: theme().rootFill, stroke: theme().rootStroke, lw: 2.5, rad: 10,
-    text: root.name, textColor: ROOT_TEXT(), textSize: 15, textWeight: 700,
-    uuid: root.uuid,
-  });
+  function layoutNode(
+    node: TreeNode,
+    x: number,
+    yStart: number,
+    parentColorIndex: number
+  ): { cy: number; height: number } {
+    const { w, h } = nodeSize(node);
+    const totalH = subtreeHeight(node);
+    const cy = yStart + totalH / 2;
+    const boxY = cy - h / 2;
+    const isRoot = node.depth === 0;
+    const isLeaf = node.children.length === 0;
+    const c = branchColor(parentColorIndex);
 
-  let curY = 25 + rootH + 40;
-  const branchData: Array<{ mid: number; bi: number }> = [];
+    // Background zone for depth-1 branches
+    if (node.depth === 1) {
+      els.push({
+        type: "box", x: x - ZONE_PAD, y: yStart - ZONE_PAD,
+        w: 0, h: totalH + ZONE_PAD * 2,
+        fill: c.zone, stroke: c.stroke + "20", lw: 1, rad: 10, dash: c.dash,
+      });
+    }
 
-  let maxRightEdge = 0;
-
-  root.children.forEach((b, bi) => {
-    const c = branchColor(bi);
-    const kids = b.children;
-
-    // Compute branch box width and height from text
-    const branchText = `${bi + 1}. ${b.name}`;
-    const nW = adaptiveWidth(branchText, 185, 12, 600, 350);
-    const branchH = measureBoxHeight(branchText, nW, 12, 600, 40);
-
-    // Compute per-branch leaf width
-    const maxLW = kids.length > 0
-      ? Math.max(baseLW, ...kids.map((k) => adaptiveWidth(k.name, baseLW, 12, 400, 400)))
-      : baseLW;
-    const lX = bX + nW + 70;
-
-    // Compute each leaf height
-    const leafHeights = kids.map((k) => measureBoxHeight(k.name, maxLW, 12, 400, 34));
-    const kH = leafHeights.length > 0
-      ? leafHeights.reduce((s, h) => s + h, 0) + (leafHeights.length - 1) * lGap
-      : 0;
-    const blockH = Math.max(branchH, kH);
-    const nY = curY + (blockH - branchH) / 2;
-    const mid = nY + branchH / 2;
-    branchData.push({ mid, bi });
-
-    // Background zone
-    const zoneTop = curY - 8;
-    const zoneH = blockH + 16;
+    // Node box
     els.push({
-      type: "box", x: bX - 12, y: zoneTop, w: lX + maxLW - bX + 36, h: zoneH,
-      fill: c.zone, stroke: c.stroke + "20", lw: 1, rad: 10, dash: c.dash,
+      type: "box", x, y: boxY, w, h,
+      fill: isRoot ? theme().rootFill : (isLeaf ? c.leafFill : c.fill),
+      stroke: isRoot ? theme().rootStroke : (isLeaf ? c.leafStroke : c.stroke),
+      lw: isRoot ? 2.5 : (isLeaf ? 0.8 : 1.5),
+      rad: isRoot ? 10 : (isLeaf ? 6 : 8),
+      text: isRoot ? node.name : (node.depth === 1 ? `${parentColorIndex + 1}. ${node.name}` : node.name),
+      textColor: isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text),
+      textSize: isRoot ? 15 : 12,
+      textWeight: isRoot ? 700 : (isLeaf ? 400 : 600),
+      dash: isLeaf ? c.dash : undefined,
+      uuid: node.uuid,
     });
 
-    // Branch box
-    els.push({
-      type: "box", x: bX, y: nY, w: nW, h: branchH,
-      fill: c.fill, stroke: c.stroke, lw: 1.5, rad: 8,
-      text: branchText, textColor: c.text, textSize: 12, textWeight: 600,
-      uuid: b.uuid,
-    });
+    maxX = Math.max(maxX, x + w);
 
-    // Branch → leaf bezier curves + leaf boxes
-    if (kids.length) {
-      const lStartY = curY + (blockH - kH) / 2;
-      let leafY = lStartY;
-      kids.forEach((k, ki) => {
-        const lH = leafHeights[ki];
-        const lcy = leafY + lH / 2;
-        const sx = bX + nW, sy = mid;
-        const ex = lX, ey = lcy;
+    if (node.children.length) {
+      const childX = x + w + COL_GAP;
+      const childrenTotalH = node.children.reduce((s, c2) => s + subtreeHeight(c2), 0)
+        + (node.children.length - 1) * NODE_GAP;
+      let childY = yStart + (totalH - childrenTotalH) / 2;
+
+      node.children.forEach((child, ci) => {
+        const childColorIdx = isRoot ? ci : parentColorIndex;
+        const childResult = layoutNode(child, childX, childY, childColorIdx);
+
+        // Bezier curve
+        const sx = x + w, sy = cy;
+        const ex = childX, ey = childResult.cy;
         const cpx = (sx + ex) / 2;
         els.push({
           type: "curve", x1: sx, y1: sy, cx1: cpx, cy1: sy, cx2: cpx, cy2: ey, x2: ex, y2: ey,
-          color: c.stroke + "50", lw: 1.5,
+          color: (isRoot ? branchColor(ci) : c).stroke + (isRoot ? "60" : "50"), lw: isRoot ? 2 : 1.5,
         });
-        els.push({
-          type: "box", x: lX, y: leafY, w: maxLW, h: lH,
-          fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
-          text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
-          uuid: k.uuid,
-        });
-        leafY += lH + lGap;
+
+        childY += childResult.height + NODE_GAP;
       });
+
+      // Update zone width for depth-1 branches
+      if (node.depth === 1) {
+        const zoneEl = els.find(
+          (e) => e.type === "box" && "fill" in e && e.fill === c.zone && e.y === yStart - ZONE_PAD
+        );
+        if (zoneEl && zoneEl.type === "box") {
+          zoneEl.w = maxX - x + ZONE_PAD * 2;
+        }
+      }
     }
-    maxRightEdge = Math.max(maxRightEdge, lX + maxLW);
-    curY += blockH + bGap;
-  });
 
-  // Root → branch bezier curves
-  const rootRX = 25 + 150, rootCY = 25 + rootH / 2;
-  branchData.forEach(({ mid, bi }) => {
-    const c = branchColor(bi);
-    const cpx = (rootRX + bX) / 2;
-    els.push({
-      type: "curve", x1: rootRX, y1: rootCY, cx1: cpx, cy1: rootCY, cx2: cpx, cy2: mid, x2: bX, y2: mid,
-      color: c.stroke + "60", lw: 2,
-    });
-  });
+    return { cy, height: totalH };
+  }
 
-  return { elements: els, bounds: { x: 0, y: 0, w: maxRightEdge + 40, h: curY + 20 } };
+  const result = layoutNode(root, 25, 25, 0);
+  return { elements: els, bounds: { x: 0, y: 0, w: maxX + 40, h: result.height + 50 } };
 }

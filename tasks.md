@@ -1,65 +1,93 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-04-06
+**Last Updated:** 2026-04-08
 
-## v1.0 Milestone
+## Completed
 
-### Feature: Project Scaffold
+### Feature: Project Scaffold (completed 2026-04-06)
 - [x] Requirements defined (outline-canvas-logseq-plugin-requirements.md)
 - [x] HTML prototype created (outline-canvas-v2.html)
 - [x] Scaffold TypeScript project (package.json, vite, tsconfig)
 - [x] Create all source modules with layout logic ported from prototype
-- [ ] Type check passes (`npm run typecheck`)
-- [ ] Build passes (`npm run build`)
-- [ ] Committed
+- [x] Type check passes (`npm run typecheck`)
+- [x] Build passes (`npm run build`)
+- [x] Committed
 
-### Feature: Data Adapter (Logseq API Integration)
-- [ ] Test fetchTree with a real DB graph page
-- [ ] Test fetchBlockTree with /outline slash command
-- [ ] Verify empty block filtering
-- [ ] Verify depth flattening (maxDepth > 3)
-- [ ] Validate markdown stripping on real block content
+### Feature: Canvas Interactions (completed 2026-04-06)
+- [x] Pan (pointer drag)
+- [x] Zoom (wheel, +/- buttons, keyboard)
+- [x] Fit-to-view (button, 0 key)
+- [x] Click-to-navigate (block UUID → scrollToBlockInPage)
+- [x] View switch with fade animation
+- [x] Treemap breadcrumb on hover
 
-### Feature: All 8 Views
-- [ ] Tree Chart — visual validation
-- [ ] Tree Table — visual validation
+### Feature: Plugin Integration (completed 2026-04-06)
+- [x] Toolbar button opens OutlineCanvas
+- [x] Slash command /outline focuses on current block
+- [x] Cmd+Shift+O keyboard shortcut
+- [x] Escape closes panel
+- [x] Close button (X) in toolbar
+- [x] Live updates via DB.onChanged (500ms debounce)
+- [x] Plugin settings (defaultView, maxDepth, depthMode, showEmptyBlocks, animateViewSwitch)
+
+### Feature: Multi-line Text Wrapping (completed 2026-04-06)
+- [x] Word-wrap utility (src/text.ts) with off-screen canvas measurement
+- [x] Renderer draws multi-line text in boxes
+- [x] All 8 views use measureBoxHeight for dynamic box sizing
+- [x] Adaptive node widths based on text length (adaptiveWidth)
+- [x] Fixed node overlap in Right Tree and Mind Map
+
+### Feature: Light & Dark Theme Support (completed 2026-04-07)
+- [x] Theme interface with semantic tokens (bg, rootText, accent, etc.)
+- [x] Dark and light BranchColor palettes
+- [x] All 8 views read from theme() instead of hardcoded hex
+- [x] UI CSS variables split into .oc-dark/.oc-light classes
+- [x] Live theme switching via onThemeModeChanged
+- [x] Plugin icon (128x128 PNG)
+
+### Feature: Inline Macro Renderer (completed 2026-04-07)
+- [x] {{renderer :outline-canvas}} renders static PNG diagram inline
+- [x] Optional view argument: {{renderer :outline-canvas, mind}}
+- [x] Click inline image opens full interactive overlay
+- [x] /outline-canvas slash command inserts the macro
+- [x] Off-screen rendering module (src/offscreen.ts)
+- [x] Works in right sidebar (Logseq fires renderer for all slots)
+
+### Feature: Docked Sidebar Mode (completed 2026-04-08)
+- [x] Canvas docks to right sidebar position (overlays #right-sidebar-container)
+- [x] Opens Logseq's right sidebar for natural layout reflow
+- [x] Toggle between docked and full-screen via toolbar button
+- [x] Cmd+Shift+O toggles dock/full-screen when already open
+- [x] Sidebar content hidden while canvas is docked
+- [x] Sidebar restored to previous state on close
+
+### Feature: Recursive Depth Rendering (completed 2026-04-08)
+- [x] Tree Chart, Right Tree, Mind Map rewritten as recursive layout engines
+- [x] Render arbitrary depth levels as independent connected nodes
+- [x] Configurable depth mode: "recursive" (independent nodes) or "flat" (breadcrumb labels)
+- [x] maxDepth setting prunes tree at specified depth
+- [x] depthMode setting added to plugin settings
+
+## In Progress
+
+### Feature: Visual Validation
+- [ ] Tree Chart — visual validation with real data
+- [ ] Tree Table — visual validation with real data
 - [ ] Roadmap ↕ (alternating) — visual validation
 - [ ] Roadmap → (linear) — visual validation
 - [ ] Mind Map — visual validation
 - [ ] Right Tree — visual validation
 - [ ] Fishbone — visual validation
 - [ ] Treemap — visual validation + breadcrumb hover
-
-### Feature: Canvas Interactions
-- [ ] Pan (pointer drag)
-- [ ] Zoom (wheel, +/- buttons, keyboard)
-- [ ] Fit-to-view (⊞ button, 0 key)
-- [ ] Click-to-navigate (block UUID → scrollToBlockInPage)
-- [ ] View switch with fade animation
-- [ ] Treemap breadcrumb on hover
-
-### Feature: Plugin Integration
-- [ ] Toolbar button opens OutlineCanvas
-- [ ] Slash command /outline focuses on current block
-- [ ] Ctrl+Shift+O keyboard shortcut
-- [ ] Escape closes panel
-- [ ] Live updates via DB.onChanged (500ms debounce)
-- [ ] Plugin settings (defaultView, maxDepth, showEmptyBlocks, animateViewSwitch)
+- [ ] Docked sidebar positioning — verify canvas shows correctly
 
 ### Feature: Polish & Accessibility
 - [ ] WCAG 4.5:1 contrast validation on all text
 - [ ] Dash patterns visible on all leaf borders
 - [ ] Keyboard navigation (Tab, arrows, +/-, 0, Esc)
 - [ ] HiDPI rendering verified on Retina display
-- [ ] Plugin icon (128x128 PNG)
 - [ ] README.md
 
 ## Deferred (v1.1)
 - [ ] Export as PNG via canvas.toDataURL()
 - [ ] Drill-down navigation (click leaf to re-root)
-- [ ] Maximize toggle (sidebar → full-screen)
-- [ ] Light theme support
-- [ ] Inline renderer macro ({{renderer :outline-canvas}})
-
-## Completed
-<!-- Move completed feature sections here with completion date -->

@@ -2,114 +2,111 @@ import type { TreeNode, LayoutResult, RenderElement } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight, adaptiveWidth } from "../text";
 
-function branchBoxSize(b: TreeNode): { w: number; h: number } {
-  const w = adaptiveWidth(b.name, 185, 12, 600, 350);
-  const h = measureBoxHeight(b.name, w, 12, 600, 44);
+const NODE_GAP = 16;
+const COL_GAP = 60;
+const MIN_W = 155;
+
+/** Compute box size for any node */
+function nodeSize(n: TreeNode): { w: number; h: number } {
+  const isRoot = n.depth === 0;
+  const fontSize = isRoot ? 16 : 12;
+  const fontWeight = isRoot ? 700 : 600;
+  const baseW = isRoot ? 200 : MIN_W;
+  const w = adaptiveWidth(n.name, baseW, fontSize, fontWeight);
+  const h = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
   return { w, h };
 }
 
-/** Compute the max leaf width for a branch */
-function branchLeafWidth(b: TreeNode, baseLfW: number): number {
-  if (!b.children.length) return baseLfW;
-  const leafWidths = b.children.map((k) => adaptiveWidth(k.name, baseLfW, 12, 400, 400));
-  return Math.max(baseLfW, ...leafWidths);
+/** Recursively compute the total height a subtree needs */
+function subtreeHeight(node: TreeNode): number {
+  if (!node.children.length) {
+    return nodeSize(node).h;
+  }
+  const childrenH = node.children.reduce((s, c) => s + subtreeHeight(c), 0)
+    + (node.children.length - 1) * NODE_GAP;
+  return Math.max(nodeSize(node).h, childrenH);
 }
 
-/** Compute the total row height for a branch: max of branch box and its leaves */
-function rowHeight(b: TreeNode, lfW: number, lfGap: number): number {
-  const { h: brH } = branchBoxSize(b);
-  if (!b.children.length) return brH;
-  const leafHeights = b.children.map((k) => measureBoxHeight(k.name, lfW, 12, 400, 32));
-  const kidsH = leafHeights.reduce((s, h) => s + h, 0) + (leafHeights.length - 1) * lfGap;
-  return Math.max(brH, kidsH);
-}
-
-/** Right Tree: root left, all branches stacked right, leaves further right */
+/** Right Tree: recursive left-to-right layout for arbitrary depth */
 export function layoutRightTree(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
-  const rootW = 200, rootX = 40, rootRad = 14;
-  const brGap = 24, lfGap = 6, baseLfW = 155;
-  const colGap = 170, lfColGap = 55;
-  const br = root.children;
+  let maxX = 0;
 
-  const rootH = measureBoxHeight(root.name, rootW, 16, 700, 60);
+  function layoutNode(
+    node: TreeNode,
+    x: number,
+    yStart: number,
+    parentColorIndex: number
+  ): { cy: number; height: number } {
+    const { w, h } = nodeSize(node);
+    const totalH = subtreeHeight(node);
+    const cy = yStart + totalH / 2;
+    const boxY = cy - h / 2;
+    const isRoot = node.depth === 0;
+    const colorIdx = node.depth === 0 ? 0 : (node.depth === 1 ? parentColorIndex : parentColorIndex);
+    const c = branchColor(colorIdx);
+    const isLeaf = node.children.length === 0;
 
-  // Compute per-branch leaf widths
-  const branchLfWidths = br.map((b) => branchLeafWidth(b, baseLfW));
+    // Root glow
+    if (isRoot) {
+      els.push({ type: "dot", x: x + w / 2, y: cy, r: 60, color: theme().rootGlow1 });
+      els.push({ type: "dot", x: x + w / 2, y: cy, r: 45, color: theme().rootGlow2 });
+    }
 
-  // Total height uses row height (max of branch box and leaf stack)
-  const totalH = br.reduce((s, b, i) => s + rowHeight(b, branchLfWidths[i], lfGap), 0) + (br.length - 1) * brGap;
-  const startY = 40;
-  const rootCy = startY + totalH / 2;
-
-  // Root glow
-  els.push({ type: "dot", x: rootX + rootW / 2, y: rootCy, r: 60, color: theme().rootGlow1 });
-  els.push({ type: "dot", x: rootX + rootW / 2, y: rootCy, r: 45, color: theme().rootGlow2 });
-
-  // Root box
-  els.push({
-    type: "box", x: rootX, y: rootCy - rootH / 2, w: rootW, h: rootH,
-    fill: theme().rootBoxFill, stroke: theme().rootStroke, lw: 2.5, rad: rootRad,
-    text: root.name, textColor: ROOT_TEXT(), textSize: 16, textWeight: 700,
-    uuid: root.uuid,
-  });
-
-  const brX = rootX + rootW + colGap;
-  let curY = startY;
-
-  br.forEach((b, bi) => {
-    const c = branchColor(bi);
-    const { w: brW, h: brH } = branchBoxSize(b);
-    const maxLfW = branchLfWidths[bi];
-    const rH = rowHeight(b, maxLfW, lfGap);
-    const brCy = curY + rH / 2; // center within row, not just branch box
-
-    // Root → branch bezier
-    const sx = rootX + rootW, sy = rootCy;
-    const cpx = (sx + brX) / 2;
+    // Node box
     els.push({
-      type: "curve", x1: sx, y1: sy, cx1: cpx, cy1: sy, cx2: cpx, cy2: brCy, x2: brX, y2: brCy,
-      color: c.stroke + "80", lw: 2.2,
+      type: "box", x, y: boxY, w, h,
+      fill: isRoot ? theme().rootBoxFill : (isLeaf ? c.leafFill : c.fill),
+      stroke: isRoot ? theme().rootStroke : (isLeaf ? c.leafStroke : c.stroke),
+      lw: isRoot ? 2.5 : (isLeaf ? 0.8 : 1.5),
+      rad: isRoot ? 14 : (isLeaf ? 6 : 8),
+      text: node.name,
+      textColor: isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text),
+      textSize: isRoot ? 16 : 12,
+      textWeight: isRoot ? 700 : (isLeaf ? 400 : 600),
+      dash: isLeaf ? c.dash : undefined,
+      uuid: node.uuid,
     });
 
-    // Branch box — vertically centered within the row
-    const brBoxY = curY + (rH - brH) / 2;
-    els.push({
-      type: "box", x: brX, y: brBoxY, w: brW, h: brH,
-      fill: c.fill, stroke: c.stroke, lw: 1.5, rad: 8,
-      text: b.name, textColor: c.text, textSize: 12, textWeight: 600,
-      uuid: b.uuid,
-    });
+    maxX = Math.max(maxX, x + w);
 
-    // Leaves
-    if (b.children.length) {
-      const leafHeights = b.children.map((k) => measureBoxHeight(k.name, maxLfW, 12, 400, 32));
-      const kidsH = leafHeights.reduce((s, h) => s + h, 0) + (leafHeights.length - 1) * lfGap;
-      const kidsStartY = curY + (rH - kidsH) / 2; // center leaves within the row
-      const lfX = brX + brW + lfColGap;
+    // Recurse into children
+    if (node.children.length) {
+      const childX = x + w + COL_GAP;
+      let childY = yStart;
+      const childrenTotalH = node.children.reduce((s, c2) => s + subtreeHeight(c2), 0)
+        + (node.children.length - 1) * NODE_GAP;
+      // Center children block within this node's total height
+      childY = yStart + (totalH - childrenTotalH) / 2;
 
-      let leafY = kidsStartY;
-      b.children.forEach((k, ki) => {
-        const lfH = leafHeights[ki];
-        const lcy = leafY + lfH / 2;
-        const cpx2 = (brX + brW + lfX) / 2;
+      node.children.forEach((child, ci) => {
+        const childColorIdx = node.depth === 0 ? ci : parentColorIndex;
+        const childResult = layoutNode(child, childX, childY, childColorIdx);
+
+        // Bezier from parent right edge to child left edge
+        const sx = x + w, sy = cy;
+        const ex = childX, ey = childResult.cy;
+        const cpx = (sx + ex) / 2;
+        const curveColor = isRoot
+          ? branchColor(ci).stroke + "80"
+          : c.stroke + "40";
         els.push({
-          type: "curve", x1: brX + brW, y1: brCy, cx1: cpx2, cy1: brCy, cx2: cpx2, cy2: lcy, x2: lfX, y2: lcy,
-          color: c.stroke + "40", lw: 1.3,
+          type: "curve", x1: sx, y1: sy, cx1: cpx, cy1: sy, cx2: cpx, cy2: ey, x2: ex, y2: ey,
+          color: curveColor, lw: isRoot ? 2.2 : 1.3,
         });
-        els.push({
-          type: "box", x: lfX, y: leafY, w: maxLfW, h: lfH,
-          fill: c.leafFill, stroke: c.leafStroke, lw: 0.8, rad: 6,
-          text: k.name, textColor: LEAF_TEXT(), textSize: 12, dash: c.dash,
-          uuid: k.uuid,
-        });
-        leafY += lfH + lfGap;
+
+        childY += childResult.height + NODE_GAP;
       });
     }
-    curY += rH + brGap;
-  });
 
-  const maxBrW = Math.max(...br.map((b) => branchBoxSize(b).w));
-  const maxLfWAll = Math.max(baseLfW, ...branchLfWidths);
-  return { elements: els, bounds: { x: 0, y: 0, w: brX + maxBrW + lfColGap + maxLfWAll + 40, h: totalH + 80 } };
+    return { cy, height: totalH };
+  }
+
+  const result = layoutNode(root, 40, 40, 0);
+  const totalH = result.height;
+
+  return {
+    elements: els,
+    bounds: { x: 0, y: 0, w: maxX + 40, h: totalH + 80 },
+  };
 }

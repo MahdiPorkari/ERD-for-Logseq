@@ -1,8 +1,11 @@
 import type { ViewId } from "./types";
 
+export type DepthMode = "recursive" | "flat";
+
 export interface PluginSettings {
   defaultView: ViewId;
   maxDepth: number;
+  depthMode: DepthMode;
   showEmptyBlocks: boolean;
   animateViewSwitch: boolean;
 }
@@ -10,6 +13,7 @@ export interface PluginSettings {
 export const DEFAULTS: PluginSettings = {
   defaultView: "tree",
   maxDepth: 3,
+  depthMode: "recursive",
   showEmptyBlocks: false,
   animateViewSwitch: true,
 };
@@ -43,6 +47,16 @@ export function registerSettings(): void {
         "Maximum nesting depth to render (deeper nodes are flattened).",
     },
     {
+      key: "depthMode",
+      type: "enum",
+      enumChoices: ["recursive", "flat"],
+      enumPicker: "select",
+      default: DEFAULTS.depthMode,
+      title: "Depth Mode",
+      description:
+        "Recursive: show each depth level as independent connected nodes. Flat: collapse deeper levels into breadcrumb-style leaf labels.",
+    },
+    {
       key: "showEmptyBlocks",
       type: "boolean",
       default: DEFAULTS.showEmptyBlocks,
@@ -64,6 +78,8 @@ export function getSettings(): PluginSettings {
     defaultView:
       (logseq.settings?.defaultView as ViewId) ?? DEFAULTS.defaultView,
     maxDepth: (logseq.settings?.maxDepth as number) ?? DEFAULTS.maxDepth,
+    depthMode:
+      (logseq.settings?.depthMode as DepthMode) ?? DEFAULTS.depthMode,
     showEmptyBlocks:
       (logseq.settings?.showEmptyBlocks as boolean) ?? DEFAULTS.showEmptyBlocks,
     animateViewSwitch:
