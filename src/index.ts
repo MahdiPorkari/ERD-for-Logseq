@@ -383,9 +383,6 @@ async function main(): Promise<void> {
     }
   `);
 
-  // Initial dock mode
-  applyDockMode();
-
   // Inject styles into plugin iframe
   const styleEl = document.createElement("style");
   styleEl.textContent = STYLES;

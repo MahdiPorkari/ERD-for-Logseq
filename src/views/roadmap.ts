@@ -8,7 +8,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
   const br = root.children;
   const rW = 150;
   const basePhaseW = 180, itemGap = 4;
-  const itemPadTop = 38, itemPadBot = 10, phaseGap = 40;
+  const phaseGap = 40;
 
   // Compute per-phase adaptive widths
   const phaseWidths = br.map((b) => {
@@ -23,15 +23,20 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
   const rootH = measureBoxHeight(root.name, rW, 14, 700, 52);
   const spY = alternating ? 280 : 100;
 
-  // Phase card heights — compute item heights dynamically
+  // Phase card heights — compute using actual header + item heights
+  const cardPadTop = 8;   // gap above header inside card
+  const cardPadBot = 10;  // gap below last item
+  const headerItemGap = 4; // gap between header and first item
+
   const phaseData = br.map((b, bi) => {
     const phaseW = phaseWidths[bi];
+    const headerH = measureBoxHeight(b.name, phaseW - 12, 12, 600, 26);
     const kidHeights = b.children.map((k) => measureBoxHeight(k.name, phaseW - 16, 12, 400, 28));
     const kidsH = kidHeights.length > 0
       ? kidHeights.reduce((s, h) => s + h, 0) + (kidHeights.length - 1) * itemGap
       : 0;
-    const cardH = Math.max(itemPadTop + kidsH + itemPadBot, 60);
-    return { b, bi, kids: b.children, kidHeights, cardH, phaseW };
+    const cardH = Math.max(cardPadTop + headerH + headerItemGap + kidsH + cardPadBot, 60);
+    return { b, bi, kids: b.children, kidHeights, headerH, cardH, phaseW };
   });
 
   const totalPhasesW = phaseData.reduce((s, d) => s + d.phaseW, 0) + (phaseData.length - 1) * phaseGap;
@@ -54,7 +59,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
   els.push({ type: "line", x1: spineEndX - 10, y1: spY + 6, x2: spineEndX, y2: spY, color: theme().accent + "50", lw: 2.5 });
 
   let px = startX;
-  phaseData.forEach(({ b, bi, kids, kidHeights, cardH, phaseW }, pi) => {
+  phaseData.forEach(({ b, bi, kids, kidHeights, headerH, cardH, phaseW }, pi) => {
     const c = branchColor(bi);
     const isAbove = alternating ? pi % 2 === 0 : false;
     const gapFromSpine = 12;
@@ -74,8 +79,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
     els.push({ type: "box", x: px, y: cardY, w: phaseW, h: cardH, fill: c.zone, stroke: c.stroke + "40", lw: 1, rad: 10 });
 
     // Header inside card
-    const headerH = measureBoxHeight(b.name, phaseW - 12, 12, 600, 26);
-    const headerY = cardY + 8;
+    const headerY = cardY + cardPadTop;
     els.push({
       type: "box", x: px + 6, y: headerY, w: phaseW - 12, h: headerH,
       fill: c.fill, stroke: c.stroke, lw: 1, rad: 6,
@@ -92,7 +96,7 @@ export function layoutRoadmap(root: TreeNode, _maxDepth: number, alternating: bo
     }
 
     // Children inside card
-    let itemY = headerY + headerH + 4;
+    let itemY = headerY + headerH + headerItemGap;
     kids.forEach((k, ki) => {
       const itemH = kidHeights[ki];
       els.push({
