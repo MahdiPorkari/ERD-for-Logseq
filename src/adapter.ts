@@ -13,6 +13,8 @@ let nextId = 0;
 /** Strip inline markdown formatting from text */
 function stripMarkdown(text: string): string {
   return text
+    .replace(/\{\{renderer\s[^}]*\}\}/g, "") // macro renderers
+    .replace(/\{\{[^}]*\}\}/g, "") // other macros
     .replace(/\*\*(.+?)\*\*/g, "$1") // bold
     .replace(/\*(.+?)\*/g, "$1") // italic
     .replace(/__(.+?)__/g, "$1") // bold alt
