@@ -5,3 +5,4 @@ dist/
 .vscode/*.code-workspace
 coverage/
 *.tsbuildinfo
+.playwright-cli/
