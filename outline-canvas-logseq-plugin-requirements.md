@@ -76,6 +76,15 @@ The plugin will use these Logseq Plugin API capabilities:
 
 The `unsupportedGraphType: "file"` flag ensures the plugin only loads on DB graphs.
 
+### 2.4 Iframe Isolation Constraints
+
+Plugin iframes installed via *Load plugin from web url* (e.g. `http://localhost:8080`) run on a different origin than Logseq itself (`app://` in Electron, or `http://localhost:3001` in web). Two implications for anything that positions or styles the plugin's main-UI container:
+
+1. **No direct parent-DOM mutation.** `parent.document.*` calls throw `SecurityError` and must be wrapped in `try/catch` with a safe fallback. Mutations to Logseq DOM (class toggles, style writes on sidebar elements) only work for dotdir-installed plugins.
+2. **Host-side CSS is the safe escape hatch.** `logseq.provideStyle(...)` injects CSS into the host context and is the right channel for conditional host DOM changes — e.g. use `body:has(.lsp-iframe-sandbox-container.visible[data-pid="<id>"]) ...` to react to the plugin's own visibility.
+3. **`setMainUIInlineStyle` layout-persistence gate.** As of Logseq's April 2026 plugin-libs refactor (PR #12395), Logseq persists the plugin container's last-known `left/top/right/bottom/width/height` and silently drops those keys from `setMainUIInlineStyle` once `data-inited_layout="true"`. Plugins that reposition the container on every open must either clear that flag or write inline styles directly to the container (requires same-origin) and fall back to `setMainUIInlineStyle` otherwise.
+4. **Sidebar topbar drag region.** `.cp__right-sidebar-topbar` uses `-webkit-app-region: drag` so macOS can drag the window by it. That region silently captures mouse clicks on whatever visually overlaps it; any iframe docked over the sidebar must neutralise it (e.g. by hiding the sidebar while the plugin is visible) or the toolbar's right-side buttons become unclickable.
+
 ---
 
 ## 3. Plugin Architecture

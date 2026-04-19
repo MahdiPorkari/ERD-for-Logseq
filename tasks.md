@@ -1,6 +1,6 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-04-08
+**Last Updated:** 2026-04-19
 
 ## Completed
 
@@ -68,6 +68,18 @@
 - [x] maxDepth setting prunes tree at specified depth
 - [x] depthMode setting added to plugin settings
 
+### Feature: Logseq plugin-libs refactor compatibility (completed 2026-04-19)
+After Logseq's April 2026 plugin-libs refactor (PR #12395) the docked canvas rendered empty and the maximize / close buttons stopped working. Fix covers both.
+- [x] `setContainerStyle` writes inline styles directly to `.lsp-iframe-sandbox-container` with `setProperty(..., "important")`, bypassing the `data-inited_layout` gate that was silently dropping position/size updates
+- [x] `setMainUIInlineStyle` kept as a fallback for cross-origin installs where direct writes aren't allowed
+- [x] Host-side `:has()` rule hides `#right-sidebar` while the plugin iframe has `.visible` — no cross-origin DOM mutation, no click-stealing from `-webkit-app-region: drag` on the sidebar topbar
+- [x] Plugin id in the `:has()` selector sourced from `logseq.baseInfo.id`
+- [x] Dock-refine timer tracked & cancelled on mode change so it can't overwrite full-screen styles
+- [x] Toolbar button handlers unified into a single delegated capture-phase listener on `#app`
+- [x] Defensive `html, body, #app { height: 100% }` so the iframe's flex layout can't collapse to toolbar height
+- [x] End-to-end verified via Playwright: docked → maximize → view switch → dock back → close, both modes
+- [x] Docked sidebar positioning — verified
+
 ## In Progress
 
 ### Feature: Visual Validation
@@ -79,7 +91,6 @@
 - [ ] Right Tree — visual validation
 - [ ] Fishbone — visual validation
 - [ ] Treemap — visual validation + breadcrumb hover
-- [ ] Docked sidebar positioning — verify canvas shows correctly
 
 ### Feature: Polish & Accessibility
 - [ ] WCAG 4.5:1 contrast validation on all text

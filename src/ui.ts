@@ -42,6 +42,12 @@ export const STYLES = `
   --oc-font: 'IBM Plex Mono', 'SF Mono', monospace;
 }
 
+html, body, #app {
+  height: 100%;
+  margin: 0;
+  padding: 0;
+}
+
 :root.oc-dark {
   --oc-bg: #0d0f14;
   --oc-surface: #1e1f24;

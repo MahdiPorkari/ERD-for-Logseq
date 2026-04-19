@@ -37,6 +37,43 @@ let cleanupController: (() => void) | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isDocked = true; // default to docked mode
 
+/**
+ * Logseq persists plugin container layout and silently ignores
+ * setMainUIInlineStyle's position/size keys once `data-inited_layout` is set
+ * (see libs/src/LSPlugin.core.ts main-ui:style handler). Apply our dock /
+ * full-screen styles directly to the container instead — bypasses both the
+ * gate and the async Postmate round-trip.
+ */
+function getPluginContainer(): HTMLElement | null {
+  try {
+    const id = (logseq as { baseInfo?: { id?: string } }).baseInfo?.id;
+    const doc = parent.document;
+    const byPid = id
+      ? (doc.querySelector(`.lsp-iframe-sandbox-container[data-pid="${id}"]`) as HTMLElement | null)
+      : null;
+    if (byPid) return byPid;
+    return (window.frameElement?.parentElement as HTMLElement | null) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+function camelToKebab(k: string): string {
+  return k.replace(/([A-Z])/g, "-$1").toLowerCase();
+}
+
+function setContainerStyle(style: Partial<CSSStyleDeclaration>): void {
+  const el = getPluginContainer();
+  if (!el) {
+    logseq.setMainUIInlineStyle(style as Record<string, string>);
+    return;
+  }
+  if (el.dataset?.inited_layout) delete el.dataset.inited_layout;
+  Object.entries(style).forEach(([k, v]) => {
+    el.style.setProperty(camelToKebab(k), String(v), "important");
+  });
+}
+
 function getCanvasSize(): { w: number; h: number } {
   if (!canvas) return { w: 800, h: 600 };
   const rect = canvas.getBoundingClientRect();
@@ -95,66 +132,62 @@ function switchView(viewId: ViewId): void {
 // --- Dock / Full-screen mode ---
 
 let sidebarWasOpen = false;
+let dockRefineTimer: ReturnType<typeof setTimeout> | null = null;
 
 function setDockedStyle(): void {
-  // Position iframe on the right, immediately visible
-  logseq.setMainUIInlineStyle({
-    position: "fixed",
-    zIndex: "999",
+  // Default geometry: right 40vw stripe. parent.document access is blocked
+  // cross-origin for web-URL-installed plugins, so we silently fall back.
+  // For same-origin installs (dotdir), we refine to the sidebar's exact rect.
+  let geom: Partial<CSSStyleDeclaration> = {
     top: "0",
     right: "0",
     left: "auto",
     width: "40vw",
     height: "100vh",
-    borderLeft: "none",
-  });
-
-  // Try to match the sidebar container's exact bounds
+  };
   try {
     const sidebar = parent.document.getElementById("right-sidebar-container");
     if (sidebar && sidebar.offsetWidth > 50) {
       const rect = sidebar.getBoundingClientRect();
-      logseq.setMainUIInlineStyle({
-        position: "fixed",
-        zIndex: "999",
+      geom = {
         top: `${Math.round(rect.top)}px`,
         left: `${Math.round(rect.left)}px`,
         right: "auto",
         width: `${Math.round(rect.width)}px`,
         height: `${Math.round(rect.height)}px`,
-        borderLeft: "none",
-      });
+      };
     }
-  } catch {
-    // Fallback to 40vw already set above
-  }
+  } catch { /* cross-origin — stick with 40vw fallback */ }
+  setContainerStyle({ position: "fixed", zIndex: "999", borderLeft: "none", ...geom });
 }
 
 async function applyDockMode(): Promise<void> {
+  if (dockRefineTimer) {
+    clearTimeout(dockRefineTimer);
+    dockRefineTimer = null;
+  }
   if (isDocked) {
     // Remember if sidebar was already open
     sidebarWasOpen = await isSidebarOpen();
 
-    // Open Logseq's right sidebar so the app layout makes room
+    // Open Logseq's right sidebar so the app layout makes room for our iframe.
+    // The provideStyle :has() rule auto-hides the sidebar contents while our
+    // iframe is visible — no DOM mutation needed (iframe is cross-origin).
     logseq.App.setRightSidebarVisible(true);
-
-    // Hide sidebar content so our canvas shows instead
-    try {
-      const sc = parent.document.getElementById("right-sidebar-container");
-      sc?.classList.add("oc-sidebar-hidden");
-    } catch { /* cross-origin safety */ }
 
     // Set initial position immediately (visible right away)
     setDockedStyle();
 
     // Refine position after sidebar finishes opening
-    setTimeout(() => {
+    dockRefineTimer = setTimeout(() => {
+      dockRefineTimer = null;
+      if (!isDocked) return;
       setDockedStyle();
       if (currentTree) rebuildLayout();
     }, 300);
   } else {
     // Full-screen mode
-    logseq.setMainUIInlineStyle({
+    setContainerStyle({
       position: "fixed",
       zIndex: "999",
       top: "0",
@@ -164,11 +197,7 @@ async function applyDockMode(): Promise<void> {
       height: "100vh",
       borderLeft: "none",
     });
-    // Restore sidebar content
-    try {
-      const sc = parent.document.getElementById("right-sidebar-container");
-      sc?.classList.remove("oc-sidebar-hidden");
-    } catch { /* cross-origin safety */ }
+    // (Sidebar auto-unhides when our iframe loses its .visible class)
   }
   updateDockButton(isDocked);
   setTimeout(() => {
@@ -187,9 +216,6 @@ async function isSidebarOpen(): Promise<boolean> {
 
 function hideCanvas(): void {
   logseq.hideMainUI({ restoreEditingCursor: true });
-  // Restore sidebar
-  const sidebarContainer = parent.document.getElementById("right-sidebar-container");
-  sidebarContainer?.classList.remove("oc-sidebar-hidden");
   if (isDocked && !sidebarWasOpen) {
     logseq.App.setRightSidebarVisible(false);
   }
@@ -265,30 +291,35 @@ function setupCanvas(): void {
     }
   });
 
-  // Zoom controls
-  document.getElementById("oc-zoom-in")?.addEventListener("click", () => {
-    const { w, h } = getCanvasSize();
-    controllerState.transform = zoomIn(controllerState.transform, w / 2, h / 2);
-    redraw();
-  });
-  document.getElementById("oc-zoom-out")?.addEventListener("click", () => {
-    const { w, h } = getCanvasSize();
-    controllerState.transform = zoomOut(controllerState.transform, w / 2, h / 2);
-    redraw();
-  });
-  document.getElementById("oc-fit")?.addEventListener("click", () => {
-    rebuildLayout();
-  });
-
-  // Close button
-  document.getElementById("oc-close")?.addEventListener("click", () => {
-    hideCanvas();
-  });
-
-  // Dock toggle button
-  document.getElementById("oc-dock-toggle")?.addEventListener("click", () => {
-    toggleDockMode();
-  });
+  // Delegated click handler on #app in capture phase. Covers both the
+  // toolbar controls (by id) and the view switcher buttons (by class).
+  const app = document.getElementById("app");
+  app?.addEventListener("click", (e) => {
+    const btn = (e.target as HTMLElement | null)?.closest("button") as HTMLButtonElement | null;
+    if (!btn) return;
+    if (btn.classList.contains("oc-vb")) {
+      const viewId = btn.getAttribute("data-view") as ViewId | null;
+      if (viewId) switchView(viewId);
+      return;
+    }
+    switch (btn.id) {
+      case "oc-close": hideCanvas(); break;
+      case "oc-dock-toggle": toggleDockMode(); break;
+      case "oc-zoom-in": {
+        const { w, h } = getCanvasSize();
+        controllerState.transform = zoomIn(controllerState.transform, w / 2, h / 2);
+        redraw();
+        break;
+      }
+      case "oc-zoom-out": {
+        const { w, h } = getCanvasSize();
+        controllerState.transform = zoomOut(controllerState.transform, w / 2, h / 2);
+        redraw();
+        break;
+      }
+      case "oc-fit": rebuildLayout(); break;
+    }
+  }, true);
 }
 
 function setupUI(): void {
@@ -297,13 +328,6 @@ function setupUI(): void {
 
   app.innerHTML = buildUI(VIEWS, activeView);
   setupCanvas();
-
-  app.querySelectorAll(".oc-vb").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      const viewId = btn.getAttribute("data-view") as ViewId;
-      if (viewId) switchView(viewId);
-    });
-  });
 }
 
 // --- Macro Renderer ---
@@ -351,14 +375,21 @@ async function main(): Promise<void> {
   if (typeof offTheme === "function") offHooks.push(offTheme);
 
   // CSS — injected into parent frame
+  const pluginId = (logseq as { baseInfo?: { id?: string } }).baseInfo?.id ?? "";
   logseq.provideStyle(`
     .outline-canvas-btn {
       display: flex;
       align-items: center;
     }
-    /* Hide sidebar content when canvas is docked over it */
-    .oc-sidebar-hidden #right-sidebar {
-      visibility: hidden;
+    /* Hide Logseq's right sidebar while our plugin iframe is visible. The
+       iframe is cross-origin from Logseq when installed from a URL, so we
+       can't mutate the parent DOM; this host-side :has() rule reacts to the
+       container's .visible class automatically. Required for click-through:
+       .cp__right-sidebar-topbar has -webkit-app-region: drag which silently
+       eats clicks on macOS, so hiding the sidebar is what keeps the right-
+       side toolbar buttons (maximize, close) clickable. */
+    body:has(.lsp-iframe-sandbox-container.visible[data-pid="${pluginId}"]) #right-sidebar {
+      visibility: hidden !important;
     }
     .outline-canvas-inline {
       width: 100%;
@@ -535,15 +566,6 @@ async function main(): Promise<void> {
     }
     if (e.key === "0" && !e.ctrlKey && !e.metaKey && document.activeElement?.tagName === "CANVAS") {
       rebuildLayout();
-    }
-  });
-
-  // Close when clicking outside canvas area (only in full-screen mode)
-  document.addEventListener("mousedown", (e) => {
-    if (isDocked) return; // don't close on click-outside in docked mode
-    const target = e.target as HTMLElement;
-    if (!target.closest(".oc-root")) {
-      hideCanvas();
     }
   });
 
