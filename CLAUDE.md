@@ -41,8 +41,20 @@ npm run typecheck  # TypeScript type checking
 npm run build      # Production build to dist/
 ```
 
+## End-to-End Testing
+
+```bash
+scripts/logseq-dev-up.sh   # idempotent: starts yarn watch + npx vite if needed
+scripts/logseq-smoke.sh    # opens canvas, clicks ⊞ / ✕ / Treemap, asserts state
+```
+
+The smoke script uses `window.frontend.handler.plugin.load_plugin_from_web_url_BANG_` for programmatic install (no Developer-mode UI dance) and asserts host-side state — `.lsp-iframe-sandbox-container.style.cssText` and `#right-sidebar` visibility — because the iframe at :8080 is cross-origin from Logseq at :3001.
+
+Run after every non-trivial change touching dock/full-screen, toolbar buttons, or the `provideStyle` rules.
+
 ## Reference
 
 - HTML prototype: `outline-canvas-v2.html` (standalone reference for all 8 views)
 - Requirements: `outline-canvas-logseq-plugin-requirements.md`
 - Task tracker: `tasks.md`
+- Changelog: `CHANGELOG.md`
