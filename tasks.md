@@ -5,8 +5,8 @@
 ## Completed
 
 ### Feature: Project Scaffold (completed 2026-04-06)
-- [x] Requirements defined (outline-canvas-logseq-plugin-requirements.md)
-- [x] HTML prototype created (outline-canvas-v2.html)
+- [x] Requirements defined (docs/outline-canvas-logseq-plugin-requirements.md)
+- [x] HTML prototype created (docs/outline-canvas-v2.html)
 - [x] Scaffold TypeScript project (package.json, vite, tsconfig)
 - [x] Create all source modules with layout logic ported from prototype
 - [x] Type check passes (`npm run typecheck`)

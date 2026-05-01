@@ -54,7 +54,7 @@ Run after every non-trivial change touching dock/full-screen, toolbar buttons, o
 
 ## Reference
 
-- HTML prototype: `outline-canvas-v2.html` (standalone reference for all 8 views)
-- Requirements: `outline-canvas-logseq-plugin-requirements.md`
+- HTML prototype: `docs/outline-canvas-v2.html` (standalone reference for all 8 views)
+- Requirements: `docs/outline-canvas-logseq-plugin-requirements.md`
 - Task tracker: `tasks.md`
 - Changelog: `CHANGELOG.md`

@@ -4,6 +4,22 @@
   "version": "0.1.0",
   "description": "Renders hierarchical block trees as interactive visual diagrams using Canvas2D",
   "license": "MIT",
+  "homepage": "https://github.com/logseq-dev/logseq-plugin-outline-canvas#readme",
+  "bugs": {
+    "url": "https://github.com/logseq-dev/logseq-plugin-outline-canvas/issues"
+  },
+  "keywords": [
+    "logseq",
+    "logseq-plugin",
+    "diagram",
+    "mind-map",
+    "tree",
+    "treemap",
+    "fishbone",
+    "roadmap",
+    "canvas",
+    "visualization"
+  ],
   "repository": {
     "type": "git",
     "url": "https://github.com/logseq-dev/logseq-plugin-outline-canvas"
