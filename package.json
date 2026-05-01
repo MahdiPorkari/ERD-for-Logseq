@@ -18,7 +18,8 @@
     "id": "logseq-plugin-outline-canvas",
     "title": "OutlineCanvas",
     "icon": "./icon.png",
-    "main": "dist/index.html"
+    "main": "dist/index.html",
+    "unsupportedGraphType": "file"
   },
   "release": {
     "branches": ["main"],
