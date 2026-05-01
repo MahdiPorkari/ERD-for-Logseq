@@ -75,8 +75,7 @@ function setContainerStyle(style: Partial<CSSStyleDeclaration>): void {
 }
 
 function getCanvasSize(): { w: number; h: number } {
-  if (!canvas) return { w: 800, h: 600 };
-  const rect = canvas.getBoundingClientRect();
+  const rect = canvas!.getBoundingClientRect();
   return { w: rect.width, h: rect.height };
 }
 
@@ -563,9 +562,6 @@ async function main(): Promise<void> {
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       hideCanvas();
-    }
-    if (e.key === "0" && !e.ctrlKey && !e.metaKey && document.activeElement?.tagName === "CANVAS") {
-      rebuildLayout();
     }
   });
 
