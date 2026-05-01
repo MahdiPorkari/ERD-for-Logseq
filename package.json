@@ -38,19 +38,22 @@
     "unsupportedGraphType": "file"
   },
   "release": {
-    "branches": ["main"],
+    "branches": [
+      "main"
+    ],
     "plugins": [
       [
         "@semantic-release/github",
         {
-          "assets": ["logseq-plugin-outline-canvas.zip"]
+          "assets": [
+            "logseq-plugin-outline-canvas.zip"
+          ]
         }
       ]
     ]
   },
-  "dependencies": {},
   "devDependencies": {
-    "@logseq/libs": "^0.0.17",
+    "@logseq/libs": "^0.3.3",
     "typescript": "^5.0.0",
     "vite": "^5.0.0",
     "vite-plugin-logseq": "^1.1.2"
