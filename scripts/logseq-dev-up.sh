@@ -38,7 +38,8 @@ kill_port() {
 start_logseq() {
   [[ -d "$LOGSEQ_REPO" ]] || { echo "ERROR: logseq repo not found at $LOGSEQ_REPO"; exit 1; }
   echo "starting logseq watch -> $LOGSEQ_LOG"
-  ( cd "$LOGSEQ_REPO" && nohup yarn watch >"$LOGSEQ_LOG" 2>&1 & )
+  # Logseq's package.json pins packageManager to pnpm@10.33.0 (corepack-managed)
+  ( cd "$LOGSEQ_REPO" && nohup pnpm watch >"$LOGSEQ_LOG" 2>&1 & )
 }
 
 start_plugin() {

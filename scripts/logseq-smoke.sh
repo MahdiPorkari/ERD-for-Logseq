@@ -50,6 +50,7 @@ assert_eq() {
 }
 
 pc close >/dev/null 2>&1 || true
+pc open >/dev/null
 
 echo "→ opening logseq"
 pc goto "$LOGSEQ_URL" >/dev/null
