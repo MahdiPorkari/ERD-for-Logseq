@@ -1,12 +1,12 @@
 {
   "name": "logseq-plugin-outline-canvas",
   "author": "logseq-dev",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "description": "Renders hierarchical block trees as interactive visual diagrams using Canvas2D",
   "license": "MIT",
-  "homepage": "https://github.com/logseq-dev/logseq-plugin-outline-canvas#readme",
+  "homepage": "https://github.com/hdansou/logseq-outline-canvas#readme",
   "bugs": {
-    "url": "https://github.com/logseq-dev/logseq-plugin-outline-canvas/issues"
+    "url": "https://github.com/hdansou/logseq-outline-canvas/issues"
   },
   "keywords": [
     "logseq",
@@ -22,7 +22,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/logseq-dev/logseq-plugin-outline-canvas"
+    "url": "https://github.com/hdansou/logseq-outline-canvas"
   },
   "main": "dist/index.html",
   "scripts": {
@@ -57,5 +57,9 @@
     "typescript": "^5.0.0",
     "vite": "^8.0.10",
     "vite-plugin-logseq": "^1.1.2"
+  },
+  "overrides": {
+    "dompurify": "^3.4.2",
+    "lodash-es": "^4.18.1"
   }
 }
