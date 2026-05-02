@@ -4,7 +4,9 @@ A Logseq plugin that transforms hierarchical block trees into interactive visual
 
 **Targets Logseq DB (SQLite) graphs only.**
 
-![OutlineCanvas icon](icon.png)
+![OutlineCanvas screenshot](docs/logseq-canvas.png)
+
+![OutlineCanvas demo](docs/logseq-canvas.gif)
 
 ## Features
 
