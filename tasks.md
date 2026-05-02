@@ -1,6 +1,16 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-04-19
+**Last Updated:** 2026-05-02
+
+## Released
+
+### v1.0.0 — first marketplace-ready release (2026-05-02)
+- [x] Production-readiness pass (overrides for dompurify+lodash-es, vite^8, postcss bump, dev server bound to 127.0.0.1, repo hygiene, dead code drop)
+- [x] LICENSE (MIT) added
+- [x] GitHub Actions: ci.yml (typecheck+build) and publish.yml (build+zip+release on v* tag), Node 22 LTS
+- [x] GitHub repo: https://github.com/hdansou/logseq-outline-canvas (public)
+- [x] Tag v1.0.0 pushed; release zip auto-built and attached
+- [x] Marketplace PR opened: https://github.com/logseq/marketplace/pull/794
 
 ## Completed
 
