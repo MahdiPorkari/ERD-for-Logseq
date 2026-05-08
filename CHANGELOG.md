@@ -4,6 +4,15 @@ All notable changes to OutlineCanvas are documented here. Format follows [Keep a
 
 ## [Unreleased]
 
+### Fixed
+
+- DB-graph node references now render as the referenced entity's title instead of the raw `[[uuid]]` storage form. Block titles in DB graphs encode references as `[[uuid]]`; the adapter previously stripped only the brackets, so a block titled `[[69fd1b8a-…]]` displayed its UUID. The adapter now resolves each UUID via the Editor SDK (block then page fallback), with per-build caching, bounded recursion for nested refs, and a visible placeholder when a ref can't be resolved.
+- Long URLs and file paths no longer overflow node boxes or collide with sibling nodes. `adaptiveWidth` now grows the box to fit the longest unbreakable token on a single line (capped at 720 px); `wrapText` falls back to splitting on URL/path separators (`/ ? & = - _ . :`) and ultimately character-wise so the universal "every line ≤ box width" invariant always holds.
+
+### Added
+
+- Vitest test runner with 22 unit tests covering the adapter (UUID-ref resolution, cache dedup, recursion, cycles, fetch failures) and text layout (grow-to-fit, cap, separator-break, the line-width invariant). Functions accept an optional measurer / fetcher for deterministic testing.
+
 ## [1.0.0] — 2026-05-01
 
 First marketplace-ready release. Stabilises the renderer macro syntax (`{{renderer :outline-canvas[, <view>]}}`), the five plugin settings (`defaultView`, `maxDepth`, `depthMode`, `showEmptyBlocks`, `animateViewSwitch`), the slash commands (`/outline`, `/outline-canvas`), and the `Cmd+Shift+O` keybinding. Future breaking changes to any of those will require a 2.0.0 release. Targets Logseq DB graphs only; gated via `unsupportedGraphType: "file"` in the manifest.

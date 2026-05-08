@@ -377,10 +377,11 @@ interface TreeNode {
 
 1. Fetch tree via `logseq.Editor.getPageBlocksTree(pageName)` or `logseq.Editor.getBlock(uuid, {includeChildren: true})`
 2. For each block, extract `title` (`:block/title`), strip inline markdown formatting (bold, italic, links) to get plain text for labels
-3. Preserve `uuid` on each node for click-to-navigate
-4. If a block has no children and no title (empty block), skip it
-5. If a page has multiple top-level blocks, wrap them in a virtual root node named after the page title
-6. If invoked on a zoomed-in block, use that block as the root
+3. **Resolve DB-graph node references.** In DB graphs, `[[uuid]]` is the *storage form* of a reference; the adapter must resolve each UUID-shaped inner content via `logseq.Editor.getBlock(uuid)` (then `getPage(uuid)` as fallback) and substitute the referenced entity's title. Resolutions are cached per tree build to dedupe repeated lookups, with bounded recursion (max 3 levels) so a resolved title that itself contains refs is also expanded without risking cycles. Unresolvable refs render as a visible placeholder (`↗ <short-uuid>`) so broken links remain discoverable. Page-name refs (`[[Some Page]]`) keep the existing "strip brackets" behavior.
+4. Preserve `uuid` on each node for click-to-navigate
+5. If a block has no children and no title (empty block), skip it
+6. If a page has multiple top-level blocks, wrap them in a virtual root node named after the page title
+7. If invoked on a zoomed-in block, use that block as the root
 
 ### 7.3 Depth Handling
 
@@ -408,7 +409,16 @@ The rendering engine draws a flat array of positioned elements. Each element is 
 | `text` | text, x, y, color, size, weight, align | Standalone text label |
 | `dot` | x, y, r, color | Filled circle (milestone markers, glow layers) |
 
-### 8.2 HiDPI Rendering
+### 8.2 Text Layout
+
+Node labels can hold arbitrary block text, including URLs, file paths, and other long unbreakable tokens. The text layout engine guarantees that every rendered line fits inside its node's box.
+
+- **Adaptive width.** `adaptiveWidth(text, baseWidth, ..., maxWidth)` grows the box to fit the longest whitespace-separated token on a single line. The default cap is `DEFAULT_MAX_NODE_WIDTH = 720` px so a single long URL cannot dominate the canvas; views may override the cap when their layout has more or less horizontal budget.
+- **Word wrap.** `wrapText(text, maxWidth, ...)` first splits on whitespace, then for any token still wider than `maxWidth` falls back to breaks on URL / path separators (`/ ? & = - _ . :`) — keeping each separator at the end of its preceding chunk so breaks read naturally — and ultimately to character-wise breaks. The universal invariant: every returned line measures ≤ `maxWidth`.
+- **Height.** `measureBoxHeight` reuses `wrapText` so node height always reflects the actual wrapped line count; siblings cannot collide with a node that wraps to many lines.
+- **Testability.** All three helpers accept an optional measurer (`MeasureFn`) so they can be exercised in a non-browser test environment with deterministic widths.
+
+### 8.3 HiDPI Rendering
 
 ```javascript
 const dpr = window.devicePixelRatio || 1;
@@ -419,14 +429,14 @@ ctx.scale(dpr, dpr);
 
 Re-apply on every frame and on resize.
 
-### 8.3 Pan/Zoom
+### 8.4 Pan/Zoom
 
 - Pan: pointer drag with `setPointerCapture` for reliable tracking
 - Zoom: wheel event, zoom toward cursor position
 - Zoom range: 5% to 1000%
 - Auto fit-to-view on initial render and view switch
 
-### 8.4 Touch Support
+### 8.5 Touch Support
 
 - Two-finger pinch-to-zoom (using pointer events, not touch events)
 - Single-finger drag to pan

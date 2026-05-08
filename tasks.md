@@ -1,6 +1,6 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-05-02
+**Last Updated:** 2026-05-07
 
 ## Released
 
@@ -13,6 +13,23 @@
 - [x] Marketplace PR opened: https://github.com/logseq/marketplace/pull/794
 
 ## Completed
+
+### Bug Fix: DB-graph node ref resolution (completed 2026-05-07)
+Block titles in DB graphs encode node references as `[[uuid]]`. The adapter stripped only the brackets, so the rendered diagram showed raw UUIDs instead of the referenced entity's title.
+- [x] `resolveNodeRefs(text, fetcher, cache?, depth?)` resolves UUID-form refs via `logseq.Editor.getBlock` then `getPage` fallback
+- [x] Per-build cache dedupes lookups (including parallel-race when same UUID appears multiple times)
+- [x] Bounded recursion (`MAX_REF_DEPTH = 3`) for nested refs without cycle risk
+- [x] Visible placeholder (`↗ <8-char-uuid>`) when a ref can't be resolved
+- [x] `convertBlock` / `buildTree` / `fetchBlockTree` now async; threading is internal
+- [x] Vitest set up; 11 unit tests cover happy paths, dedup, recursion, cycles, fetch failures, end-to-end
+
+### Bug Fix: URL & long-token rendering (completed 2026-05-07)
+URLs and file paths overflowed node boxes and collided with sibling nodes — `wrapText` only split on whitespace, so a single URL was treated as one unbreakable token wider than the box.
+- [x] `adaptiveWidth` grows the box to fit the longest whitespace-separated token, capped at `DEFAULT_MAX_NODE_WIDTH = 720`
+- [x] `wrapText` falls back to URL/path separator breaks (`/ ? & = - _ . :`), then character-wise as last resort
+- [x] Universal invariant: every returned line measures ≤ maxWidth (covered by a fuzz-style test)
+- [x] All three text helpers accept an optional `MeasureFn` for deterministic testing under vitest's node environment
+- [x] 11 unit tests in `src/text.test.ts`
 
 ### Feature: Project Scaffold (completed 2026-04-06)
 - [x] Requirements defined (docs/outline-canvas-logseq-plugin-requirements.md)
