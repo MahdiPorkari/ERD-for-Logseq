@@ -8,7 +8,80 @@ interface LogseqBlock {
   properties?: Record<string, unknown>;
 }
 
+/** Resolves a UUID to the referenced entity's display title. Return null if unresolvable. */
+export type RefFetcher = (uuid: string) => Promise<string | null>;
+
 let nextId = 0;
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const REF_RE = /\[\[([^\[\]]+)\]\]/g;
+const MAX_REF_DEPTH = 3;
+
+/**
+ * Replace `[[uuid]]` node references inside text with the referenced entity's
+ * title. Page-name refs like `[[Some Page]]` are left untouched (they fall
+ * through to the existing wiki-link handling in stripMarkdown).
+ *
+ * Cache is shared across one tree build to dedupe lookups and to bound the
+ * blast radius of cyclic references (a→b→a) alongside MAX_REF_DEPTH.
+ */
+export async function resolveNodeRefs(
+  text: string,
+  fetcher: RefFetcher,
+  cache: Map<string, string> = new Map(),
+  depth = 0
+): Promise<string> {
+  if (depth >= MAX_REF_DEPTH || !text.includes("[[")) return text;
+
+  REF_RE.lastIndex = 0;
+  const hits: { match: string; uuid: string }[] = [];
+  let m: RegExpExecArray | null;
+  while ((m = REF_RE.exec(text)) !== null) {
+    const inner = m[1].trim();
+    if (UUID_RE.test(inner)) hits.push({ match: m[0], uuid: inner });
+  }
+  if (hits.length === 0) return text;
+
+  const uniqueUuids = [...new Set(hits.map((h) => h.uuid))].filter((u) => !cache.has(u));
+  await Promise.all(
+    uniqueUuids.map(async (uuid) => {
+      let title: string | null = null;
+      try {
+        title = await fetcher(uuid);
+      } catch { /* unresolved */ }
+      cache.set(uuid, title?.trim() || `↗ ${uuid.slice(0, 8)}`);
+    })
+  );
+
+  let result = text;
+  for (const { match, uuid } of hits) {
+    const resolved = await resolveNodeRefs(cache.get(uuid)!, fetcher, cache, depth + 1);
+    result = result.split(match).join(resolved);
+  }
+  return result;
+}
+
+/** Default fetcher: resolves via Logseq SDK (block first, then page). */
+const defaultFetcher: RefFetcher = async (uuid) => {
+  try {
+    const block = await logseq.Editor.getBlock(uuid);
+    if (block) {
+      const t = (block as Record<string, unknown>).title as string | undefined
+        ?? (block as Record<string, unknown>).content as string | undefined;
+      if (t && t.trim()) return t;
+    }
+  } catch { /* fall through */ }
+  try {
+    const page = await logseq.Editor.getPage(uuid);
+    if (page) {
+      const t = (page as Record<string, unknown>).originalName as string | undefined
+        ?? (page as Record<string, unknown>).name as string | undefined
+        ?? (page as Record<string, unknown>).title as string | undefined;
+      if (t && t.trim()) return t;
+    }
+  } catch { /* fall through */ }
+  return null;
+};
 
 /** Strip inline markdown formatting from text */
 function stripMarkdown(text: string): string {
@@ -22,18 +95,21 @@ function stripMarkdown(text: string): string {
     .replace(/~~(.+?)~~/g, "$1") // strikethrough
     .replace(/`(.+?)`/g, "$1") // inline code
     .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links
-    .replace(/\[\[([^\]]+)\]\]/g, "$1") // wiki links
+    .replace(/\[\[([^\]]+)\]\]/g, "$1") // wiki links (page-name fallback — strip brackets only)
     .trim();
 }
 
 /** Convert a Logseq block tree to an internal TreeNode tree */
-function convertBlock(
+async function convertBlock(
   block: LogseqBlock,
   depth: number,
-  showEmpty: boolean
-): TreeNode | null {
+  showEmpty: boolean,
+  fetcher: RefFetcher,
+  cache: Map<string, string>
+): Promise<TreeNode | null> {
   const rawText = block.content ?? block.title ?? "";
-  const name = stripMarkdown(rawText);
+  const resolved = await resolveNodeRefs(rawText, fetcher, cache);
+  const name = stripMarkdown(resolved);
 
   if (!name && (!block.children || block.children.length === 0) && !showEmpty) {
     return null;
@@ -42,7 +118,7 @@ function convertBlock(
   const children: TreeNode[] = [];
   if (block.children) {
     for (const child of block.children) {
-      const node = convertBlock(child, depth + 1, showEmpty);
+      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache);
       if (node) children.push(node);
     }
   }
@@ -57,16 +133,18 @@ function convertBlock(
 }
 
 /** Build a tree from a page's block tree, wrapping multiple roots in a virtual node */
-export function buildTree(
+export async function buildTree(
   blocks: LogseqBlock[],
   pageName: string,
-  showEmpty: boolean
-): TreeNode {
+  showEmpty: boolean,
+  fetcher: RefFetcher = defaultFetcher
+): Promise<TreeNode> {
   nextId = 0;
+  const cache = new Map<string, string>();
 
   const children: TreeNode[] = [];
   for (const block of blocks) {
-    const node = convertBlock(block, 1, showEmpty);
+    const node = await convertBlock(block, 1, showEmpty, fetcher, cache);
     if (node) children.push(node);
   }
 
@@ -186,6 +264,7 @@ export async function fetchBlockTree(
   if (!block) return null;
 
   nextId = 0;
-  const node = convertBlock(block as unknown as LogseqBlock, 0, showEmpty);
+  const cache = new Map<string, string>();
+  const node = await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, defaultFetcher, cache);
   return node;
 }

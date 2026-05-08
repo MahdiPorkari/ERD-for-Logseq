@@ -524,7 +524,7 @@ async function main(): Promise<void> {
       // Build tree from children — strip macro syntax from root label
       const rawContent = (block as Record<string, unknown>).content as string ?? "Outline";
       const rootLabel = rawContent.replace(/\{\{renderer\s[^}]*\}\}/g, "").replace(/\{\{[^}]*\}\}/g, "").trim() || "Outline";
-      const tree = buildTree(
+      const tree = await buildTree(
         block.children as unknown as LogseqBlock[],
         rootLabel,
         settings.showEmptyBlocks
