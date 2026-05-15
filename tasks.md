@@ -1,8 +1,14 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-05-07
+**Last Updated:** 2026-05-15
 
 ## Released
+
+### v1.0.1 — bug fix release (2026-05-15)
+- [x] DB-graph node refs resolved to titles (UUID-form `[[uuid]]` → entity title)
+- [x] Long URLs / file paths wrap inside node boxes (grow-to-fit + separator-break fallback)
+- [x] Vitest runner + 22 unit tests (adapter + text)
+- [x] Tagged `v1.0.1`, release zip auto-built
 
 ### v1.0.0 — first marketplace-ready release (2026-05-02)
 - [x] Production-readiness pass (overrides for dompurify+lodash-es, vite^8, postcss bump, dev server bound to 127.0.0.1, repo hygiene, dead code drop)
@@ -108,6 +114,38 @@ After Logseq's April 2026 plugin-libs refactor (PR #12395) the docked canvas ren
 - [x] Docked sidebar positioning — verified
 
 ## In Progress
+
+### Feature: Node Relationship Connectors (target v1.1.0)
+Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties (DB type `:node`). Specced in `docs/feature-node-relationship-connectors.md`.
+
+**Adapter (TDD)**
+- [ ] Extend `TreeNode` with `refs: { kind: "relates_to" | "depends_on"; targetUuid: string }[]`
+- [ ] Probe `block.properties[ident]` value shape via `logseq-plugin-tester` (one-shot, log + read)
+- [ ] `resolveRelProperty(ident, cache)` — resolves property ident → `RelKind | null` via `Editor.getBlock` title match (fallback: `DB.datascriptQuery` if `getBlock` rejects idents)
+- [ ] `convertBlock` walks `block.properties`, normalizes `:cardinality/one` and `:cardinality/many` value shapes into `NodeRef[]`
+- [ ] `filterIntraTreeRefs(root)` — collects every UUID in tree, drops `refs` whose target isn't in the set; runs **after** `flattenDeep` pruning
+- [ ] `refs` survives `flattenDeep` in both `recursive` and `flat` modes (deep-clone preserves them)
+- [ ] Unit tests: cardinality one + many, title-match (not ident-prefix), rename scenario, external-ref drop, pruned-subtree drop, cache dedup
+
+**Layout & overlay**
+- [ ] Add `nodeRectsByUuid: Map<string, Rect>` to `LayoutResult` shape; populate from Tree Chart, Right Tree, Mind Map layouts
+- [ ] New `src/views/edges.ts` — `buildEdgeElements(root, rectsByUuid, theme): RenderElement[]`
+- [ ] Anchor selection: midpoint of closest face per source/target relative position (4 quadrants)
+- [ ] `drawArrowHead(ctx, from, to, color)` primitive in `renderer.ts`
+- [ ] Pass `dash` through `RenderElement` line element for `relates_to` style
+- [ ] Three connector-supporting views invoke the overlay; other 5 views skip silently
+- [ ] Unit tests: anchor picks correct face in each quadrant, missing target rect handled, no element emitted when `showRelationships` is false
+
+**Theme + settings**
+- [ ] `connectorDepends` and `connectorRelates` tokens in `src/colors.ts` (light + dark)
+- [ ] WCAG 3:1 contrast verified for both tokens against canvas bg
+- [ ] `showRelationships: boolean` (default `true`) added to `src/settings.ts`
+
+**Verification**
+- [ ] Manual smoke: create `relates_to` + `depends_on` properties, link two blocks, render Tree Chart / Right Tree / Mind Map, verify connectors
+- [ ] PNG macro renderer includes connectors (no code change expected — verify)
+- [ ] Live update via `DB.onChanged` reflects property add/remove within 500ms debounce
+- [ ] CHANGELOG entry under `[Unreleased]`
 
 ### Feature: Visual Validation
 - [ ] Tree Chart — visual validation with real data
