@@ -1,3 +1,12 @@
+/** Kinds of cross-hierarchy relationships rendered as connectors */
+export type RelKind = "relates_to" | "depends_on";
+
+/** An outgoing relationship edge declared on a block */
+export interface NodeRef {
+  kind: RelKind;
+  targetUuid: string;
+}
+
 /** Internal tree node converted from Logseq BlockEntity */
 export interface TreeNode {
   name: string;
@@ -5,6 +14,7 @@ export interface TreeNode {
   depth: number;
   id: number;
   uuid: string;
+  refs?: NodeRef[];
 }
 
 /** Positioned box element */
@@ -35,6 +45,10 @@ export interface LineElement {
   y2: number;
   color: string;
   lw: number;
+  /** Dash pattern for the line; solid when omitted. */
+  dash?: number[];
+  /** When true, draw a filled arrowhead at (x2, y2) pointing along the line direction. */
+  arrowEnd?: boolean;
 }
 
 /** Cubic bezier curve element */
@@ -50,6 +64,10 @@ export interface CurveElement {
   y2: number;
   color: string;
   lw: number;
+  /** Dash pattern; solid when omitted. */
+  dash?: number[];
+  /** When true, draw an arrowhead at (x2, y2) tangent to the curve. */
+  arrowEnd?: boolean;
 }
 
 /** Standalone text element */
@@ -81,10 +99,24 @@ export type RenderElement =
   | TextElement
   | DotElement;
 
+/** Rectangle in canvas coordinates */
+export interface Rect {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
 /** Output of a layout engine */
 export interface LayoutResult {
   elements: RenderElement[];
   bounds: { x: number; y: number; w: number; h: number };
+  /**
+   * Optional map of node UUID → laid-out rect. Populated by views that
+   * support connector overlays (Tree Chart, Right Tree, Mind Map). Other
+   * views may leave this undefined.
+   */
+  nodeRectsByUuid?: Map<string, Rect>;
 }
 
 /** View identifiers */

@@ -1,12 +1,15 @@
 import "@logseq/libs";
-import type { ViewId, ViewDef, RenderElement, TreeNode } from "./types";
+import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
 import { registerSettings, getSettings } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree } from "./adapter";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs } from "./adapter";
+import type { LogseqBlock } from "./adapter";
+import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
+import { buildBadges, buildFocusHalo } from "./views/badges";
 import { render, hitTest } from "./renderer";
 import { createState, fitToView, zoomIn, zoomOut, attachHandlers } from "./controller";
-import { buildUI, STYLES, setActiveView, applyThemeToUI, updateDockButton } from "./ui";
+import { buildUI, STYLES, setActiveView, applyThemeToUI, updateDockButton, applyPlatformClass, updateFullscreenClass } from "./ui";
 import { setTheme } from "./colors";
-import { renderToDataURL } from "./offscreen";
+import { renderToDataURL, exportCurrentViewAsDataURL } from "./offscreen";
 import { layoutTreeChart } from "./views/tree-chart";
 import { layoutTreeTable } from "./views/tree-table";
 import { layoutRoadmapAlt, layoutRoadmapLinear } from "./views/roadmap";
@@ -29,6 +32,9 @@ const VIEWS: ViewDef[] = [
 // Plugin state
 let activeView: ViewId = "tree";
 let currentTree: TreeNode | null = null;
+let currentDisplayTree: TreeNode | null = null;
+let currentLayout: LayoutResult | null = null;
+let focusedUuid: string | null = null;
 let currentElements: RenderElement[] = [];
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
@@ -85,16 +91,75 @@ function redraw(): void {
   render(ctx, currentElements, controllerState.transform, w, h);
 }
 
+/**
+ * Compose the flat RenderElement list from the cached layout, current focus,
+ * and badges/halo. Cheap — called on every focus change or theme refresh.
+ * Caller is responsible for triggering a redraw afterward.
+ */
+function composeElements(): void {
+  if (!currentDisplayTree || !currentLayout) {
+    currentElements = currentLayout?.elements ?? [];
+    return;
+  }
+  const settings = getSettings();
+  const rects = currentLayout.nodeRectsByUuid;
+  const wantOverlay = settings.showRelationships && !!rects;
+
+  const overlay = wantOverlay
+    ? buildEdgeElements(currentDisplayTree, rects!, focusedUuid)
+    : [];
+  const labels = wantOverlay && settings.showRelationshipLabels
+    ? buildEdgeLabels(currentDisplayTree, rects!, focusedUuid)
+    : [];
+  const badges = wantOverlay
+    ? buildBadges(currentDisplayTree, rects!)
+    : [];
+  const halo = wantOverlay
+    ? buildFocusHalo(focusedUuid, rects!)
+    : [];
+
+  // Render order (low → high z): halo, layout elements, edges, labels, badges.
+  currentElements = [...halo, ...currentLayout.elements, ...overlay, ...labels, ...badges];
+}
+
+/**
+ * Recompute the full layout from the current tree, view, and settings, then
+ * compose elements and reset the camera. Called when the tree changes, the
+ * view changes, or settings change — NOT on focus changes (those use
+ * composeElements() to avoid resetting the user's pan/zoom state).
+ */
 function rebuildLayout(): void {
   if (!currentTree) return;
   const settings = getSettings();
-  const tree = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
+  const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
+  const tree = settings.showRelationships ? filterIntraTreeRefs(pruned) : pruned;
   const view = VIEWS.find((v) => v.id === activeView)!;
   const result = view.layout(tree, settings.maxDepth);
-  currentElements = result.elements;
+
+  currentDisplayTree = tree;
+  currentLayout = result;
+  composeElements();
+
+  // Diagnostic: surface ref state once per rebuild so users can debug missing connectors.
+  let refCount = 0;
+  (function count(n: TreeNode): void {
+    refCount += n.refs?.length ?? 0;
+    for (const c of n.children) count(c);
+  })(tree);
+  console.debug(
+    `[OutlineCanvas] view=${activeView} focus=${focusedUuid ?? "none"} refs(intra-tree)=${refCount} rects=${result.nodeRectsByUuid?.size ?? 0}`
+  );
 
   const { w, h } = getCanvasSize();
   controllerState.transform = fitToView(result.bounds, w, h);
+  redraw();
+}
+
+/** Set the focused node and refresh display (no camera reset). */
+function setFocus(uuid: string | null): void {
+  if (focusedUuid === uuid) return;
+  focusedUuid = uuid;
+  composeElements();
   redraw();
 }
 
@@ -103,6 +168,9 @@ async function loadTree(blockUuid?: string): Promise<void> {
   currentTree = blockUuid
     ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks)
     : await fetchTree(settings.showEmptyBlocks);
+
+  // New tree → previous focus may not exist anymore.
+  focusedUuid = null;
 
   if (currentTree) {
     rebuildLayout();
@@ -199,6 +267,7 @@ async function applyDockMode(): Promise<void> {
     // (Sidebar auto-unhides when our iframe loses its .visible class)
   }
   updateDockButton(isDocked);
+  updateFullscreenClass(isDocked);
   setTimeout(() => {
     if (currentTree) rebuildLayout();
   }, 100);
@@ -243,7 +312,8 @@ function setupCanvas(): void {
   controllerState = createState();
   cleanupController = attachHandlers(canvas, controllerState, redraw);
 
-  // Click-to-navigate
+  // Click on a node: focus its relationships AND navigate Logseq to the block.
+  // Click on empty canvas: clear focus (edges fade out).
   canvas.addEventListener("click", async (e) => {
     if (controllerState.isDragging) return;
     const rect = canvas!.getBoundingClientRect();
@@ -251,6 +321,7 @@ function setupCanvas(): void {
     const cy = e.clientY - rect.top;
     const hit = hitTest(currentElements, cx, cy, controllerState.transform);
     if (hit?.uuid) {
+      setFocus(hit.uuid);
       const block = await logseq.Editor.getBlock(hit.uuid);
       if (block) {
         const page = await logseq.Editor.getPage((block as Record<string, unknown>).page as number);
@@ -260,6 +331,8 @@ function setupCanvas(): void {
           await logseq.Editor.scrollToBlockInPage(pageName, hit.uuid);
         }
       }
+    } else {
+      setFocus(null);
     }
   });
 
@@ -317,8 +390,62 @@ function setupCanvas(): void {
         break;
       }
       case "oc-fit": rebuildLayout(); break;
+      case "oc-export": exportCurrentView(); break;
+      case "oc-copy": copyCurrentView(); break;
     }
   }, true);
+}
+
+/**
+ * Capture the current view as a PNG (WYSIWYG — uses the live transform and
+ * canvas dimensions). Includes both `depends_on` and `relates_to` edges
+ * regardless of focus / showRelationships. Triggers a browser download.
+ */
+function exportCurrentView(): void {
+  if (!currentDisplayTree || !currentLayout) return;
+  const settings = getSettings();
+  const { w, h } = getCanvasSize();
+  const dataURL = exportCurrentViewAsDataURL(
+    currentDisplayTree,
+    currentLayout,
+    w,
+    h,
+    controllerState.transform,
+    settings.showRelationshipLabels
+  );
+  if (!dataURL) return;
+
+  const ts = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+  const link = document.createElement("a");
+  link.download = `outline-canvas-${activeView}-${ts}.png`;
+  link.href = dataURL;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+}
+
+async function copyCurrentView(): Promise<void> {
+  if (!currentDisplayTree || !currentLayout) return;
+  const settings = getSettings();
+  const { w, h } = getCanvasSize();
+  const dataURL = exportCurrentViewAsDataURL(
+    currentDisplayTree,
+    currentLayout,
+    w,
+    h,
+    controllerState.transform,
+    settings.showRelationshipLabels
+  );
+  if (!dataURL) return;
+
+  try {
+    const blob = await (await fetch(dataURL)).blob();
+    await navigator.clipboard.write([new ClipboardItem({ "image/png": blob })]);
+    logseq.UI.showMsg("OutlineCanvas: image copied to clipboard", "success");
+  } catch (err) {
+    console.error("OutlineCanvas: clipboard write failed", err);
+    logseq.UI.showMsg("OutlineCanvas: clipboard copy failed (try export instead)", "warning");
+  }
 }
 
 function setupUI(): void {
@@ -331,13 +458,6 @@ function setupUI(): void {
 
 // --- Macro Renderer ---
 
-interface LogseqBlock {
-  uuid: string;
-  content?: string;
-  title?: string;
-  children?: LogseqBlock[];
-}
-
 function escapeHtml(str: string): string {
   return str
     .replace(/&/g, "&amp;")
@@ -347,7 +467,6 @@ function escapeHtml(str: string): string {
 }
 
 async function main(): Promise<void> {
-  console.log("OutlineCanvas loaded!");
   const offHooks: Array<() => void> = [];
 
   // Settings
@@ -427,6 +546,7 @@ async function main(): Promise<void> {
   // Build UI
   setupUI();
   applyThemeToUI();
+  applyPlatformClass();
 
   // Model for click handlers
   logseq.provideModel({
@@ -590,7 +710,6 @@ async function main(): Promise<void> {
     if (debounceTimer) clearTimeout(debounceTimer);
   });
 
-  console.log("OutlineCanvas ready!");
 }
 
 logseq.ready(main).catch(console.error);

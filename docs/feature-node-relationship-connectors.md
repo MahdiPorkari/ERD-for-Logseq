@@ -1,9 +1,9 @@
 # Feature: Node Relationship Connectors
 
-**Version:** 1.0
-**Date:** May 15, 2026
-**Status:** Scoped
-**Target Release:** v1.1.0
+**Version:** 1.1
+**Date:** May 16, 2026
+**Status:** Implemented (pre-release v1.1.0)
+**Initial Scope:** May 15, 2026
 
 ---
 
@@ -14,11 +14,13 @@ Render cross-hierarchy relationships between blocks as visual connectors on the 
 - **`relates_to`** — symmetric association between two blocks.
 - **`depends_on`** — directional dependency: source depends on target.
 
-When OutlineCanvas renders a subtree, any block carrying these properties whose target is **also** in the rendered subtree gets a connector drawn between the two boxes. The tree hierarchy still drives layout; relationships are an overlay pass.
+When OutlineCanvas renders a subtree, any block carrying these properties whose target is **also** in the rendered subtree becomes a candidate for a visual connector between the two boxes. The tree hierarchy still drives layout; relationships are an overlay pass.
+
+UX uses a **lazy edges + badges** model: at rest the diagram is clean (no edges drawn) — every node carrying refs shows small corner badges with outgoing / incoming counts. Clicking a node focuses it (accent halo) and fades in just its edges. This scales to dense graphs without spaghetti and preserves tree readability.
 
 ## 2. Motivation
 
-Block hierarchy alone can't capture all real-world structure. Project tasks under one parent often depend on tasks under a different parent. Concepts in one branch of a knowledge tree relate to concepts in another. Today, users can express these relationships in Logseq as node-typed properties — but the diagram drops the signal because it only walks parent → child links.
+Block hierarchy alone can't capture all real-world structure. Project tasks under one parent often depend on tasks under a different parent. Concepts in one branch of a knowledge tree relate to concepts in another. Users can express these relationships in Logseq as node-typed properties, but the diagram historically dropped that signal because it only walked parent → child links.
 
 Connectors make the second graph visible without flattening the first.
 
@@ -26,23 +28,29 @@ Connectors make the second graph visible without flattening the first.
 
 ### In scope (v1.1)
 
-- Reading `relates_to` and `depends_on` properties off DB-graph blocks.
-- Supporting both `:db.cardinality/one` and `:db.cardinality/many` value shapes.
+- Reading `relates_to` and `depends_on` properties off DB-graph blocks (both top-level namespaced keys and the `.properties` sub-object, with or without leading colon).
+- Supporting `:db.cardinality/one` and `:db.cardinality/many` value shapes, plus the four ref shapes the SDK surfaces: bare UUID string, `{"block/uuid": "..."}`, `{uuid: "..."}`, and `{id: <number>}` (numeric `:db/id` resolved via async `Editor.getBlock`).
 - Connectors in three views: **Tree Chart**, **Right Tree**, **Mind Map**.
 - Drawing connectors only between nodes already visible in the rendered subtree (intra-tree only).
-- Differentiated visual encoding: `depends_on` = solid line with arrowhead, `relates_to` = dashed line without arrow.
-- Light + dark theme support.
-- Settings toggle to hide the overlay (default on).
-- Inclusion in off-screen PNG renderer (inline macro output).
+- Differentiated visual encoding: `depends_on` = solid bezier with arrowhead, `relates_to` = dashed bezier without arrow.
+- **Stacked-column routing**: when source and target share an x-range (would strike through intermediate boxes on a straight path), the curve arcs outward on the same-side faces to avoid occlusion.
+- **Lazy edges**: nothing drawn at rest. Click a node → its outgoing + incoming edges fade in. Click empty canvas → fade out. Existing click-to-navigate behaviour preserved.
+- **Badges**: every node touched by refs gets corner annotations — `→N` top-right (outgoing), `←N` bottom-right (incoming). Color-coded to match edge styles. Pure visual indicators; not hit-test targets.
+- **Focus halo**: accent-colored ring around the currently focused node so the user knows whose edges they're looking at.
+- **Optional edge labels** (off by default, `showRelationshipLabels` setting): small pill at each visible curve's midpoint showing the property name, with bg-colored fill so it occludes crossing connectors cleanly.
+- **Export PNG**: download button (⬇) and copy-to-clipboard button (📋) in the toolbar — both render the current WYSIWYG view (current pan/zoom, all edges shown, no badges/halo/chrome) using the Tabler Icons set Logseq uses.
+- Light + dark theme support with semantic tokens.
+- Static PNG macro renderer (`{{renderer :outline-canvas}}`) surfaces badges (counts) but not edges — clicking the inline image opens the interactive view where the user can focus a node.
+- `showRelationships` master toggle (default on) — when off, edges/badges/halo/labels all disappear.
 
-### Out of scope (deferred or never)
+### Out of scope (deferred)
 
-- **External targets.** If `A depends_on B` and only A is in the rendered subtree, the edge is dropped silently. No phantom nodes, no edge-of-canvas stubs. (Deferred — possibly v1.2.)
-- **Other views.** Treemap, Fishbone, Roadmap ↕, Roadmap →, Tree Table render the source/target nodes as usual but draw no connector.
-- **Generic property discovery.** Only `relates_to` and `depends_on` (matched by `:block/title`). Arbitrary node-typed properties are ignored.
-- **Connector hover/click affordances.** Nodes remain the only clickable surface. (Deferred.)
-- **Orthogonal / collision-avoiding edge routing.** v1.1 uses simple bezier curves between anchor points. May visually cross tree branches in dense subtrees.
-- **Edge labels.** No text on connectors.
+- **External targets.** If `A depends_on B` and only A is in the rendered subtree, the edge is dropped silently. No phantom nodes, no edge-of-canvas stubs.
+- **Other views.** Treemap, Fishbone, Roadmap ↕, Roadmap →, Tree Table render source/target nodes as usual but draw no connector and show no badge.
+- **Generic property discovery.** Only `relates_to` and `depends_on` (matched by ident prefix — see §4.2). Arbitrary node-typed properties are ignored.
+- **Connector hover/click affordances.** Curves are not interactive — the focused-node click is the only interaction.
+- **Orthogonal / collision-avoiding edge routing.** Curves may visually cross tree branches in dense subtrees; the stacked-column routing covers the common cases but isn't a full router.
+- **Reverse-direction Datascript queries.** Edges are sourced exclusively from outgoing properties on visible nodes. A node's "incoming" count is derived by walking the in-memory tree's `refs`, not from a global graph query.
 
 ## 4. Data Model
 
@@ -55,178 +63,212 @@ User-created properties have auto-generated namespaced idents with random suffix
 :user.property/depends_on-SfjMwya6
 ```
 
-The ident is **immutable** once assigned. The user-visible name lives on the property entity as `:block/title`:
+The ident is **immutable** once assigned. In JS via `@logseq/libs`, properties surface as **top-level namespaced keys** on the block object — `block["user.property/relates_to-HG66AZUl"]` (or with a leading colon: `block[":user.property/relates_to-HG66AZUl"]`). The legacy `.properties` sub-object is also checked as a defensive fallback.
 
-```edn
-:user.property/relates_to-HG66AZUl
-{:db/cardinality :db.cardinality/one
- :logseq.property/type :node
- :block/title "relates_to"}
+A block carrying a relationship surfaces (variously) as:
+
+```ts
+{
+  uuid: "69e2f7b5-0784-...",
+  title: "**User-defined properties** ...",
+  "user.property/relates_to-HG66AZUl": { id: 1234 }                       // numeric :db/id
+  // OR { "block/uuid": "69e2f7b5-..." } / { uuid: "..." } / "uuid-string" / array-of-any
+}
 ```
 
-A block carrying a relationship looks like:
+### 4.2 Property identification strategy — IDENT PREFIX
 
-```edn
-{:block/title "**User-defined properties**: ..."
- :build/properties {:user.property/relates_to-HG66AZUl
-                    [:block/uuid #uuid "69e2f7b5-0784-..."]}}
+The plugin matches on the ident's local-name prefix:
+
+```
+^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$
 ```
 
-The value is a ref tuple (or array of ref tuples for `:cardinality/many`).
+**Decision changed from initial scope.** The original plan was title-matching (resolve each property ident → its `:block/title` via `Editor.getBlock(ident)`, then check title equals `relates_to` / `depends_on`). In practice this added one extra round-trip per unique property and depended on `getBlock` accepting namespaced idents — a hard-to-verify SDK boundary. Prefix matching is:
 
-### 4.2 Property identification strategy
-
-The plugin **must match by `:block/title`**, not by raw ident.
-
-- Ident prefix matching (`relates_to-*`) is brittle: if the user renames the property to "blocks", the underlying ident keeps the old prefix and we'd silently keep treating it as `relates_to`.
-- Title matching produces the intuitive "the property you currently see called `relates_to`" semantics.
-
-Implementation: maintain a per-build cache `Map<propertyIdent, RelKind | null>` to avoid re-resolving the same property entity multiple times.
+- **Synchronous and zero-cost** — no extra lookups per property.
+- **Stable enough** — the user creates properties named `relates_to` / `depends_on`; if they rename one later, the connector keeps drawing for that property. We treat this as an acceptable v1 edge case.
 
 ### 4.3 Adapter additions
 
-`TreeNode` gains a new field:
+`TreeNode` gains:
 
 ```ts
+export type RelKind = "relates_to" | "depends_on";
+
 interface NodeRef {
-  kind: "relates_to" | "depends_on";
+  kind: RelKind;
   targetUuid: string;
 }
 
 interface TreeNode {
   // ... existing fields
-  refs: NodeRef[];  // outgoing relationship edges declared on this block
+  refs?: NodeRef[];
 }
 ```
 
-`convertBlock` walks `block.properties`, resolves each `user.property/*` key via `Editor.getBlock(ident)`, filters by title, and pushes `NodeRef` entries with the target UUID(s) into `node.refs`. Single-value and many-value shapes are normalized in this step.
+`convertBlock` calls `extractRefs(block, idCache, idResolver)`:
+
+1. Iterate top-level block keys + `.properties` sub-object.
+2. For each key matching the relationship prefix regex, walk the value via `extractRefUuids`:
+   - `string` → UUID-shaped string used directly
+   - `{"block/uuid": "..."}` → use directly
+   - `{uuid: "..."}` → use directly
+   - `{id: <number>}` → call `idResolver(id)` (default: `Editor.getBlock(id)` → `.uuid`), cache the resolution per build
+   - `Array<...>` → flatMap over members
+3. Push a `NodeRef` per resolved target uuid, dedup'd (`kind|target` signature) across top-level + `.properties` paths.
 
 ### 4.4 Intra-tree filter
 
-After `buildTree` returns, a single pass collects every node UUID in the tree into a `Set<string>`, then walks the tree again and drops any `NodeRef` whose `targetUuid` is not in the set. External refs never reach the layout layer.
-
-This pass runs **after** depth pruning (`flattenDeep` / `pruneAtDepth`), so refs into pruned-away subtrees are also dropped.
+`filterIntraTreeRefs(root: TreeNode): TreeNode` collects every node UUID in the tree into a `Set`, then walks again and drops any `NodeRef` whose `targetUuid` is not in the set. Runs **after** `flattenDeep` pruning, so refs into depth-pruned subtrees are also dropped. Returns a structurally-cloned tree — input is untouched.
 
 ## 5. Layout & Rendering
 
-### 5.1 Layout responsibility
+### 5.1 Layout output
 
-The three connector-supporting views each currently produce a `RenderElement[]` flat list. They will additionally produce a `nodeRectsByUuid: Map<string, Rect>` mapping every laid-out node's UUID to its final on-canvas rect (after the view's transform, before pan/zoom).
+`LayoutResult` gains `nodeRectsByUuid?: Map<string, Rect>`. Populated by Tree Chart, Right Tree, Mind Map. Other views leave it undefined; the overlay pipeline produces nothing for them.
 
-```ts
-interface LayoutResult {
-  elements: RenderElement[];
-  width: number;
-  height: number;
-  nodeRectsByUuid: Map<string, Rect>;  // NEW
-}
-```
-
-### 5.2 Overlay pass
-
-New module `src/views/edges.ts`:
+### 5.2 Edge overlay — `src/views/edges.ts`
 
 ```ts
-buildEdgeElements(
-  root: TreeNode,
-  rectsByUuid: Map<string, Rect>,
-  theme: Theme
-): RenderElement[]
+buildEdgeElements(root, rectsByUuid, focusedUuid?): RenderElement[]
+buildEdgeLabels(root, rectsByUuid, focusedUuid?): RenderElement[]
 ```
 
-Walks the tree, for each node's `refs[]`:
+`focusedUuid` semantics:
+- `undefined` → eager mode: emit every edge (used by PNG export).
+- `string` → lazy mode: only edges where source OR target = focused.
+- `null` → suppress entirely (used by macro renderer / pre-interaction state).
 
-1. Look up source rect (the node's own rect) and target rect (from `rectsByUuid.get(targetUuid)`).
-2. If either rect is missing, skip (defensive — the intra-tree filter should have handled this).
-3. Pick anchor points: the midpoint of the closest face on each rect, based on relative position.
-4. Push either an arrowed line element (`depends_on`) or a dashed line element (`relates_to`).
+Per-edge geometry:
 
-The renderer composes the overlay elements **after** the tree elements but **before** pan/zoom transformation, so connectors live in canvas coordinates and zoom proportionally with the diagram.
+- Compute `dx`, `dy` between source/target centers.
+- **Stacked case** (x-ranges overlap, |dy| > 8): anchor both endpoints on the right faces; push control points further right by `max(50, |dy| * 0.45)`. Curve bulges outward, around intermediate boxes.
+- **Horizontal-dominant**: anchor on facing left/right faces, mid-x control points (matches tree-branch bezier style).
+- **Vertical-dominant** (no x-overlap): anchor on top/bottom faces, mid-y control points.
 
-### 5.3 Renderer primitive
+Each edge becomes a `CurveElement`. `depends_on` adds `arrowEnd: true` (filled triangle tangent to curve at endpoint). `relates_to` adds `dash: [6, 4]`.
 
-`src/renderer.ts` gains:
+Labels (`buildEdgeLabels`): same filtering and geometry; at `t = 0.5` along the curve, emit a `BoxElement` pill (solid bg fill, kind-colored border) and centered `TextElement` with the property name.
+
+### 5.3 Renderer primitives
+
+- `LineElement` and `CurveElement` both carry optional `dash?: number[]` and `arrowEnd?: boolean`.
+- New `drawArrowHead(ctx, x1, y1, x2, y2, color, lw)` — filled triangle. For curves the arrow direction is tangent at the endpoint, computed from the `(cp2 → endpoint)` vector.
+
+### 5.4 Badges — `src/views/badges.ts`
 
 ```ts
-drawArrowHead(ctx: CanvasRenderingContext2D, from: Point, to: Point, color: string): void
+buildBadges(root, rectsByUuid): RenderElement[]
+buildFocusHalo(focusedUuid, rectsByUuid): RenderElement[]
 ```
 
-Line drawing reuses existing `drawLine` and `drawCurve` with a new `dash` parameter passed through `RenderElement` for the dashed `relates_to` style.
+- One pass over the tree builds `Map<uuid, outCount>` and `Map<uuid, inCount>`.
+- For each rect with non-zero counts: emit a pill (rounded box) + centered text. Outgoing badge top-right (`connectorDepends` fill), incoming bottom-right (`connectorRelates` fill). Text color: theme `bg` for inverted contrast.
+- Badges deliberately have no `uuid` so `hitTest` skips them — the node body underneath remains clickable.
+- Focus halo: single bordered, accent-dim-filled box drawn behind the focused rect (extends ±6px). Rendered before layout elements so it sits under the node.
 
-### 5.4 Theme tokens
+### 5.5 Theme tokens
 
-`src/colors.ts` adds two semantic tokens to both light and dark palettes:
-
-| Token | Light | Dark | Purpose |
+| Token | Dark | Light | Purpose |
 |---|---|---|---|
-| `connectorDepends` | warm accent, opacity 0.75 | same hue, opacity 0.85 | `depends_on` line + arrowhead |
-| `connectorRelates` | neutral mid-gray, opacity 0.5 | neutral mid-gray, opacity 0.6 | `relates_to` dashed line |
+| `connectorDepends` | `#f76800d8` | `#c44d00d8` | `depends_on` line + arrowhead + outgoing badge fill |
+| `connectorRelates` | `#a8a8b2a0` | `#555568a0` | `relates_to` dashed line + incoming badge fill |
 
-WCAG contrast against the canvas background must hit 3:1 minimum (treated as a graphical UI element, not text).
+Halo reuses existing `accent` / `accentDim`. Label pills reuse `bg` (fill) + `muted` (text).
+
+### 5.6 Render order (low → high z)
+
+```
+focus halo
+└─ layout elements (tree branches + node boxes)
+   └─ overlay edges (curves)
+      └─ edge labels (pill + text)
+         └─ badges (pill + text)
+```
 
 ## 6. Settings
 
-Add to `src/settings.ts`:
-
 | Key | Type | Default | Description |
 |---|---|---|---|
-| `showRelationships` | `boolean` | `true` | When false, the overlay pass is skipped entirely and the diagram renders as it did in v1.0. |
+| `showRelationships` | `boolean` | `true` | Master toggle. When off, edges + badges + halo + labels all suppressed; canvas renders as v1.0. |
+| `showRelationshipLabels` | `boolean` | `false` | Show property-name labels at curve midpoints. Useful at first; off-by-default to keep the diagram quiet once line styles become familiar. |
 
-No per-property toggle in v1.1 — users either see both kinds or none.
+No per-property toggle, no per-view toggle.
 
-## 7. Off-Screen Macro Renderer
+## 7. PNG Output
 
-`src/offscreen.ts` requires no logic change. Connectors are part of the `RenderElement[]` list that off-screen already drains. The inline macro PNG will include connectors automatically.
+### 7.1 Inline macro renderer (`offscreen.renderToDataURL`)
 
-## 8. Performance Considerations
+`{{renderer :outline-canvas}}` produces a **static** PNG with:
+- Layout elements (tree)
+- **Badges** (counts) — discovery signal for "this graph has relationships"
+- **No** edges (no interactivity in a static image; would clutter)
+- **No** halo / focus state
 
-- Property entity resolution adds one `Editor.getBlock(ident)` call per **unique** property ident on the rendered tree (typically 2 — one for each of `relates_to` and `depends_on`). Cached per tree build.
-- Outgoing-ref reads are zero-cost — already in the block's `properties` map.
-- No reverse-direction Datascript query in v1.1. Edges are sourced exclusively from outgoing properties on visible nodes.
+Clicking the inline image opens the interactive view where the user can focus a node to see its edges.
 
-## 9. Testing
+### 7.2 Live export (`offscreen.exportCurrentViewAsDataURL`)
 
-### Adapter (`src/adapter.test.ts`)
+Triggered by the ⬇ download or 📋 copy button in the canvas toolbar. WYSIWYG — uses the live transform (pan/zoom) and canvas dimensions. Includes:
+- Layout elements
+- **All** edges (eager — passes `focusedUuid` undefined)
+- **Labels** if `showRelationshipLabels` is on (mirrors live setting)
+- **No** badges, halo, or interaction chrome
 
-- Extracts a single `:cardinality/one` ref correctly.
-- Extracts an array of refs from `:cardinality/many`.
-- Resolves property kind via title, not ident (rename scenario: ident says `relates_to-*` but title says `blocks` → no ref extracted).
-- Caches property-ident → title lookups (no duplicate fetcher calls).
-- Drops external refs after intra-tree filter.
-- Preserves `refs` through `flattenDeep` in both `recursive` and `flat` modes.
-- Drops refs into pruned-away subtrees.
+The Copy button uses `navigator.clipboard.write([new ClipboardItem({"image/png": blob})])` and surfaces success/error via `logseq.UI.showMsg`. Falls back gracefully if the clipboard API isn't available.
 
-### Edge layout (`src/views/edges.test.ts`)
+## 8. Toolbar Icons
 
-- Anchor selection picks the right face midpoint for each of the 4 relative-position quadrants (target up-left, up-right, down-left, down-right of source).
-- Emits arrow element for `depends_on`, dashed element for `relates_to`.
-- Skips refs whose target rect is missing from `nodeRectsByUuid` without throwing.
-- Returns an empty array when `showRelationships` setting is false (or, equivalently, when the caller doesn't invoke the overlay pass).
+Switched from Unicode glyphs to inlined **Tabler Icons** SVGs (the icon set Logseq itself uses) for the new download and copy buttons. Stroke uses `currentColor` so they pick up the existing button color + hover state.
 
-### No new visual smoke required — the existing `scripts/logseq-smoke.sh` covers the rendering path.
+## 9. Platform Considerations
 
-## 10. Risk & Mitigations
+In full-screen mode on macOS, the iframe covers the whole window — including the area where the OS draws the native window controls (traffic lights). The toolbar applies `padding-left: 84px` via the `.oc-fullscreen.oc-platform-mac` class combo to clear that area. Docked mode is unaffected.
 
-| Risk | Mitigation |
+## 10. Performance
+
+- One DB round-trip per unique numeric `:db/id` ref value, cached per tree build.
+- No additional Datascript queries.
+- Edge / badge / label composition is pure tree walking + map lookups — runs in O(nodes + refs).
+- `composeElements` is split from `rebuildLayout` so focus changes redraw without recomputing layout or resetting camera. Tree/view/setting changes trigger a full `rebuildLayout`.
+
+## 11. Testing
+
+`npm test` runs **64 unit tests** across:
+
+| File | Coverage |
 |---|---|
-| Property value surface in JS doesn't match EDN tuple shape | Quick probe via `logseq-plugin-tester` at implementation start — log `block.properties` on a known block. |
-| Connector crossings make dense Tree Chart layouts unreadable | Visually distinguished encoding (color + dash style) makes overlap legible. Setting toggle lets users disable if it becomes a problem. |
-| `Editor.getBlock(ident)` does not accept namespaced idents | Fall back to a `DB.datascriptQuery` for property entities by title. Two-line change to the resolver. |
-| Renamed property leaves stale refs in DB | Title-match strategy correctly stops counting them. No corrective action needed. |
+| `src/adapter.test.ts` | UUID ref resolution in titles, refs extraction (one/many cardinality, top-level keys, leading-colon keys, `{id}` async resolution, ident-prefix matching, intra-tree filter, `flattenDeep` preserves refs) |
+| `src/text.test.ts` | Text wrapping, adaptive width, separator-break fallback |
+| `src/views/edges.test.ts` | Curve geometry (4 quadrants + stacked column), depends_on=arrow / relates_to=dashed, lazy filter (focusedUuid undefined/null/match/miss), label emission |
+| `src/views/badges.test.ts` | Outgoing/incoming counts, both-badges-on-one-node, missing-rect skipping, focus halo bounds |
 
-## 11. Resolved Decisions
+Manual smoke (not automated):
+- Create `relates_to` + `depends_on` properties in a Logseq DB graph, link two blocks, render Tree Chart / Right Tree / Mind Map, verify edges appear on focus and badges show counts.
+- Toggle `showRelationshipLabels`, verify pills appear/disappear at curve midpoints.
+- Trigger ⬇ download and 📋 copy from the toolbar; verify file downloads / clipboard contains PNG with edges.
 
-| Decision | Choice |
-|---|---|
-| Property names | Hardcoded `relates_to` and `depends_on` |
-| Match strategy | By current `:block/title`, cached per build |
-| Endpoint scope | Intra-tree only — external refs dropped |
-| Views | Tree Chart, Right Tree, Mind Map only |
-| Visual: depends_on | Solid line + arrowhead |
-| Visual: relates_to | Dashed line, no arrowhead |
-| Settings toggle | `showRelationships`, default on |
+## 12. Resolved Decisions
 
-## 12. Open Items (resolve at implementation start)
+| Decision | Choice | Rationale |
+|---|---|---|
+| Property names | Hardcoded `relates_to` and `depends_on` | Predictable, zero-config |
+| Match strategy | **Ident prefix** (`user.property/<kind>-<suffix>`) | Synchronous; no SDK round-trip per property; rename edge case acceptable |
+| Endpoint scope | Intra-tree only | External refs dropped at adapter boundary |
+| Views | Tree Chart, Right Tree, Mind Map | Recursive layouts with known rect positions |
+| Visual: `depends_on` | Solid bezier + arrowhead | Directional semantic |
+| Visual: `relates_to` | Dashed bezier, no arrow | Symmetric semantic |
+| Stacked-column routing | Same-side anchors + outward bulge | Avoids strike-through when target sits in the same column |
+| Lazy edges | Edges hidden at rest; click-to-focus | Scales to dense graphs without spaghetti |
+| Badges | Always visible (when `showRelationships` on) | Discovery signal — tells the user relationships exist |
+| Labels | Setting-gated (`showRelationshipLabels`, default off) | Useful for newcomers; off keeps diagram quiet |
+| PNG macro content | Badges only, no edges | Static image can't be focused; clicking opens interactive |
+| Export PNG | All edges shown; labels follow setting; no badges/halo | Static deliverable for sharing |
 
-1. **Property value JS shape** — probe `block.properties[ident]` returned by `@logseq/libs`. Expected: `{ id, "block/uuid": "..." }` or a bare UUID string; possibly a hydrated block entity. Write the extraction code against the actual shape.
-2. **`Editor.getBlock(ident)` acceptance of idents** — verify it resolves namespaced property idents to property entities. If not, swap to `DB.datascriptQuery`.
+## 13. Implementation Notes (post-build)
+
+- **`{id: <number>}` was the dominant value shape in practice.** The original spec listed it as one of several possibilities; in real DB graphs it's what the SDK actually returns from `Editor.getBlock` for node-typed property values. The async `idResolver` is exercised every time.
+- **Property keys come with a leading colon** in some SDK paths (`:user.property/...`) and without in others. The prefix regex handles both.
+- **`block.properties` is mostly empty in DB graphs.** The top-level-key iteration is the primary path; the `.properties` fallback rarely fires but is kept for defense in depth.
+- **`Editor.getBlock(<numeric id>)` works reliably.** The original concern about needing `DB.datascriptQuery` fallback never materialized.

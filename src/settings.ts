@@ -8,6 +8,8 @@ export interface PluginSettings {
   depthMode: DepthMode;
   showEmptyBlocks: boolean;
   animateViewSwitch: boolean;
+  showRelationships: boolean;
+  showRelationshipLabels: boolean;
 }
 
 export const DEFAULTS: PluginSettings = {
@@ -16,6 +18,8 @@ export const DEFAULTS: PluginSettings = {
   depthMode: "recursive",
   showEmptyBlocks: false,
   animateViewSwitch: true,
+  showRelationships: true,
+  showRelationshipLabels: false,
 };
 
 export function registerSettings(): void {
@@ -70,6 +74,22 @@ export function registerSettings(): void {
       title: "Animate View Transitions",
       description: "Enable fade animation when switching diagram views.",
     },
+    {
+      key: "showRelationships",
+      type: "boolean",
+      default: DEFAULTS.showRelationships,
+      title: "Show Relationship Connectors",
+      description:
+        "Draw lines between blocks that reference each other via 'relates_to' or 'depends_on' node properties (Tree Chart, Right Tree, Mind Map only).",
+    },
+    {
+      key: "showRelationshipLabels",
+      type: "boolean",
+      default: DEFAULTS.showRelationshipLabels,
+      title: "Label Relationship Connectors",
+      description:
+        "Display the property name ('depends_on' / 'relates_to') as a small pill at the midpoint of each connector. Useful as a visual cue at first; turn off once the line styles are familiar.",
+    },
   ]);
 }
 
@@ -85,5 +105,11 @@ export function getSettings(): PluginSettings {
     animateViewSwitch:
       (logseq.settings?.animateViewSwitch as boolean) ??
       DEFAULTS.animateViewSwitch,
+    showRelationships:
+      (logseq.settings?.showRelationships as boolean) ??
+      DEFAULTS.showRelationships,
+    showRelationshipLabels:
+      (logseq.settings?.showRelationshipLabels as boolean) ??
+      DEFAULTS.showRelationshipLabels,
   };
 }

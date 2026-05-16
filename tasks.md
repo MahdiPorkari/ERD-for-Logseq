@@ -1,6 +1,6 @@
 # OutlineCanvas — Task Tracker
 
-**Last Updated:** 2026-05-15
+**Last Updated:** 2026-05-16
 
 ## Released
 
@@ -113,39 +113,106 @@ After Logseq's April 2026 plugin-libs refactor (PR #12395) the docked canvas ren
 - [x] End-to-end verified via Playwright: docked → maximize → view switch → dock back → close, both modes
 - [x] Docked sidebar positioning — verified
 
+## Completed (continued)
+
+### Production-hardening pass (2026-05-16)
+Pre-v1.1.0-release sweep. `npm audit` clean (overrides from v1.0.0 hold); typecheck + 64 tests + build green.
+
+**Applied (A — KISS / DRY)**
+- [x] Extracted `renderElementsToDataURL` private primitive in `src/offscreen.ts`; both `renderToDataURL` and `exportCurrentViewAsDataURL` now call it instead of duplicating the canvas-setup/render/toDataURL sequence
+- [x] Deduped `LogseqBlock` interface — exported from `src/adapter.ts`, imported in `src/index.ts` (was declared twice)
+- [x] Removed dev-banner `console.log("OutlineCanvas loaded!/ready!")` calls from `src/index.ts`
+
+**Applied (C — docs)**
+- [x] `README.md` updated: added Relationship Connectors section (badges, lazy edges, focus halo, optional labels, stacked-column routing); added Export section (⬇ download + 📋 copy); Settings table now lists `Show Relationship Connectors` + `Label Relationship Connectors`; fixed git clone URL (was `logseq-dev/logseq-plugin-outline-canvas` → now `hdansou/logseq-outline-canvas` matching package.json); qualified accessibility claim to distinguish text (4.5:1) from graphical-element connectors (3:1)
+
+**Applied (E — repo hygiene)**
+- [x] `.gitignore` expanded: added `.vite/`, `.eslintcache`, `*.cache`, `*.tmp`, `*.swp`, `*~`, `.cursor/`, `.codeium/`. Added explanatory note that `AGENTS.md` is tracked (in contrast to the `.claude/` etc. local-state directories)
+- [x] Verified no currently-tracked files would be retroactively ignored by the new patterns
+
+**Deferred (B — see "Refactor: Split src/index.ts" below)**
+- [ ] `src/index.ts` decomposition into `dock-mode.ts` / `macro.ts` / `interaction.ts` — own commit, not in v1.1.0
+
+### Feature: Node Relationship Connectors (target v1.1.0, completed 2026-05-16)
+Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties (DB type `:node`). Full spec in `docs/feature-node-relationship-connectors.md`.
+
+**Adapter**
+- [x] `TreeNode.refs?: NodeRef[]` (`{ kind: RelKind; targetUuid: string }`)
+- [x] `extractRefs(block, idCache, idResolver)` walks BOTH top-level namespaced keys (DB-graph surface) and `.properties` (legacy fallback), with leading-colon tolerance
+- [x] **Match by ident prefix** (`user.property/(relates_to|depends_on)-…`) — synchronous, no SDK round-trip per property. (Original spec said "title match"; abandoned mid-build for simplicity and SDK independence — see §4.2 of spec.)
+- [x] `extractRefUuids` normalizes all 4 value shapes: bare UUID string, `{"block/uuid": …}`, `{uuid: …}`, `{id: <number>}` via async `idResolver` (default `Editor.getBlock(id)` then read `.uuid`). Arrays flatMap'd. Dedup'd across top-level + `.properties` paths via `kind|uuid` signature.
+- [x] `filterIntraTreeRefs(root)` post-prune filter — drops refs to nodes not in the rendered tree
+- [x] `refs` preserved through `flattenDeep` in both `recursive` and `flat` modes (structuredClone)
+- [x] 11 tests in `adapter.test.ts` (cardinality one+many, top-level keys, leading-colon keys, dedup, `{id}` async resolution, idResolver caching, intra-tree filter, pruned subtrees, missing-rect skipping)
+
+**Layout, edges, badges, halo, labels**
+- [x] `LayoutResult.nodeRectsByUuid?: Map<string, Rect>` populated by Tree Chart, Right Tree, Mind Map (others undefined; overlay yields nothing for them)
+- [x] `src/views/edges.ts` — `buildEdgeElements(root, rectsByUuid, focusedUuid?)`
+  - [x] Anchor selection across 3 cases: stacked column (same-side anchors + outward bulge), horizontal-dominant (facing faces + mid-x controls), vertical-dominant (top/bottom + mid-y)
+  - [x] **CurveElement** (cubic bezier), not LineElement — matches existing tree-branch visual language and supports the outward bulge
+  - [x] `depends_on` = solid + arrowhead (`arrowEnd: true`, tangent at endpoint); `relates_to` = dashed (`dash: [6, 4]`), no arrow
+  - [x] **Lazy filter**: `focusedUuid === null` → emit none; `string` → only edges where source OR target = focused; `undefined` → emit all (for export)
+- [x] `src/views/edges.ts` — `buildEdgeLabels(root, rectsByUuid, focusedUuid?)`
+  - [x] `bezierMidpoint` helper (P(t=0.5) formula)
+  - [x] Solid bg-colored pill (occludes crossing curves) + kind-colored border + muted text
+- [x] `src/views/badges.ts` — `buildBadges(root, rects)` and `buildFocusHalo(focusedUuid, rects)`
+  - [x] Outgoing badge top-right (`→N`, `connectorDepends` fill); incoming bottom-right (`←N`, `connectorRelates` fill); both with theme `bg` text for contrast
+  - [x] Badges have no uuid → hitTest skips them; node body remains clickable
+  - [x] Focus halo: accent-dim fill + accent stroke box behind the focused rect
+- [x] `drawArrowHead` primitive in `renderer.ts`; `dash` + `arrowEnd` fields on both `LineElement` and `CurveElement`
+- [x] 9 edges tests + 5 label tests + 9 badge/halo tests in `edges.test.ts` and `badges.test.ts`
+
+**UX: lazy edges + click semantics**
+- [x] Plugin state: `focusedUuid: string | null`, `currentDisplayTree`, `currentLayout`
+- [x] `composeElements()` split from `rebuildLayout()` — focus changes redraw without recomputing layout or resetting camera
+- [x] Click node → `setFocus(uuid)` + existing `scrollToBlockInPage` (both actions; navigation preserved)
+- [x] Click empty canvas → `setFocus(null)` (fade out)
+- [x] Render order (low → high z): halo → layout → edges → labels → badges
+- [x] `loadTree` resets `focusedUuid` (previous focus may not exist in new tree)
+- [x] Diagnostic `console.debug` per rebuild: view, focus, ref count, rect count
+
+**Settings + theme**
+- [x] `connectorDepends` (orange `#f76800d8` / `#c44d00d8`) and `connectorRelates` (gray `#a8a8b2a0` / `#555568a0`) tokens in `src/colors.ts` for light + dark
+- [x] `showRelationships: boolean` (default `true`) — master toggle for edges + badges + halo + labels
+- [x] `showRelationshipLabels: boolean` (default `false`) — optional property-name pills at curve midpoints
+
+**Export PNG (download + copy)**
+- [x] Inline Tabler Icons SVGs (matches Logseq's icon set) — download (`⬇`) + copy (`📋`) buttons in toolbar
+- [x] `exportCurrentViewAsDataURL(displayTree, layout, w, h, transform, showLabels)` — WYSIWYG using live transform + canvas size; all edges always; labels follow setting; no badges/halo/chrome
+- [x] Download button → `<a download>` trigger with `outline-canvas-<view>-<timestamp>.png`
+- [x] Copy button → `navigator.clipboard.write([new ClipboardItem({"image/png": blob})])` + `logseq.UI.showMsg` feedback
+- [x] PNG macro renderer (`offscreen.renderToDataURL`) — badges only, no edges (no interactivity in static image; click image opens interactive view)
+
+**Platform**
+- [x] macOS traffic-light clearance in full-screen: 84px left padding on `.oc-toolbar` via `.oc-fullscreen.oc-platform-mac` class combo
+- [x] Platform detection runs once via `applyPlatformClass()`; fullscreen class toggled on every dock-mode change
+
+**Documentation**
+- [x] `docs/feature-node-relationship-connectors.md` updated to reflect implemented state (v1.1, 2026-05-16)
+- [x] CHANGELOG entry under `[Unreleased]`
+
 ## In Progress
 
-### Feature: Node Relationship Connectors (target v1.1.0)
-Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties (DB type `:node`). Specced in `docs/feature-node-relationship-connectors.md`.
+### Refactor: Split `src/index.ts` (target v1.2.0)
+Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concerns). Surfaced by the 2026-05-16 production-readiness pass. Should be its own commit / release branch, not bundled with v1.1.0.
 
-**Adapter (TDD)**
-- [ ] Extend `TreeNode` with `refs: { kind: "relates_to" | "depends_on"; targetUuid: string }[]`
-- [ ] Probe `block.properties[ident]` value shape via `logseq-plugin-tester` (one-shot, log + read)
-- [ ] `resolveRelProperty(ident, cache)` — resolves property ident → `RelKind | null` via `Editor.getBlock` title match (fallback: `DB.datascriptQuery` if `getBlock` rejects idents)
-- [ ] `convertBlock` walks `block.properties`, normalizes `:cardinality/one` and `:cardinality/many` value shapes into `NodeRef[]`
-- [ ] `filterIntraTreeRefs(root)` — collects every UUID in tree, drops `refs` whose target isn't in the set; runs **after** `flattenDeep` pruning
-- [ ] `refs` survives `flattenDeep` in both `recursive` and `flat` modes (deep-clone preserves them)
-- [ ] Unit tests: cardinality one + many, title-match (not ident-prefix), rename scenario, external-ref drop, pruned-subtree drop, cache dedup
+**Proposed module split** (final names TBD during implementation):
+- [ ] `src/dock-mode.ts` — `getPluginContainer`, `setContainerStyle`, `setDockedStyle`, `applyDockMode`, `isSidebarOpen`, `toggleDockMode`, `hideCanvas` (~100 lines). Owns the dock-vs-fullscreen geometry and the macOS traffic-light padding behavior.
+- [ ] `src/macro.ts` — the `onMacroRendererSlotted` handler, `escapeHtml` helper (~50 lines). Owns the `{{renderer :outline-canvas}}` inline PNG path.
+- [ ] `src/interaction.ts` — focus state (`focusedUuid`, `setFocus`), click + escape handlers, `hitTest` wiring (~80 lines). Owns "what happens when the user clicks the canvas."
+- [ ] `src/index.ts` shrinks to ~300 lines: imports, VIEWS registry, plugin state declarations, `main()`, slash command + toolbar registration.
 
-**Layout & overlay**
-- [ ] Add `nodeRectsByUuid: Map<string, Rect>` to `LayoutResult` shape; populate from Tree Chart, Right Tree, Mind Map layouts
-- [ ] New `src/views/edges.ts` — `buildEdgeElements(root, rectsByUuid, theme): RenderElement[]`
-- [ ] Anchor selection: midpoint of closest face per source/target relative position (4 quadrants)
-- [ ] `drawArrowHead(ctx, from, to, color)` primitive in `renderer.ts`
-- [ ] Pass `dash` through `RenderElement` line element for `relates_to` style
-- [ ] Three connector-supporting views invoke the overlay; other 5 views skip silently
-- [ ] Unit tests: anchor picks correct face in each quadrant, missing target rect handled, no element emitted when `showRelationships` is false
+**Approach (TDD-compatible)**:
+- [ ] Add tests against `interaction.ts` (focus state transitions) and `dock-mode.ts` (style application) before moving code
+- [ ] Move one module at a time, run typecheck + tests + build after each
+- [ ] Verify smoke (manual) after every move — dock toggle, full-screen toggle, macro rendering, click-to-focus
+- [ ] Keep current module boundaries unchanged in `adapter.ts`, `renderer.ts`, view files — only `index.ts` is splitting
 
-**Theme + settings**
-- [ ] `connectorDepends` and `connectorRelates` tokens in `src/colors.ts` (light + dark)
-- [ ] WCAG 3:1 contrast verified for both tokens against canvas bg
-- [ ] `showRelationships: boolean` (default `true`) added to `src/settings.ts`
-
-**Verification**
-- [ ] Manual smoke: create `relates_to` + `depends_on` properties, link two blocks, render Tree Chart / Right Tree / Mind Map, verify connectors
-- [ ] PNG macro renderer includes connectors (no code change expected — verify)
-- [ ] Live update via `DB.onChanged` reflects property add/remove within 500ms debounce
-- [ ] CHANGELOG entry under `[Unreleased]`
+**Done when**:
+- [ ] `wc -l src/index.ts` ≤ 350
+- [ ] No new public API surface (only intra-plugin imports change)
+- [ ] All 64+ existing tests still pass; new module tests added
+- [ ] Manual smoke: dock toggle, full-screen toggle, macro insertion, click-to-focus, export PNG, copy PNG all work unchanged
 
 ### Feature: Visual Validation
 - [ ] Tree Chart — visual validation with real data
@@ -164,6 +231,9 @@ Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties 
 - [ ] HiDPI rendering verified on Retina display
 - [ ] README.md
 
-## Deferred (v1.1)
-- [ ] Export as PNG via canvas.toDataURL()
+## Deferred (post-v1.1)
 - [ ] Drill-down navigation (click leaf to re-root)
+- [ ] External-target connectors (phantom stub nodes for refs whose target isn't in the rendered subtree)
+- [ ] Reverse-direction graph queries (find all blocks that point INTO a given block, not just outgoing)
+- [ ] Per-property visual config (custom colors / dash patterns per property name)
+- [ ] Hover-to-show-edge interaction (lighter than click-to-focus)

@@ -1,6 +1,14 @@
 import type { ViewId, ViewDef } from "./types";
 import { theme } from "./colors";
 
+// Tabler Icons (https://tabler-icons.io) — same library Logseq uses, so the
+// plugin's iconography matches the host UI. Inlined here because the plugin
+// iframe is cross-origin and can't share Logseq's icon CSS. Stroke uses
+// currentColor so icons pick up the button color + hover state automatically.
+const ICON_DOWNLOAD = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2 -2v-2"/><path d="M7 11l5 5l5 -5"/><path d="M12 4l0 12"/></svg>`;
+
+const ICON_COPY = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"/><path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
+
 /** Build the HTML for the main UI panel (injected into #app in the iframe) */
 export function buildUI(views: ViewDef[], activeView: ViewId): string {
   const viewButtons = views
@@ -18,6 +26,8 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
       <div class="oc-toolbar">
         <div class="oc-views">${viewButtons}</div>
         <div class="oc-toolbar-right">
+          <button class="oc-ctrl oc-ctrl--icon" id="oc-copy" title="Copy current view to clipboard">${ICON_COPY}</button>
+          <button class="oc-ctrl oc-ctrl--icon" id="oc-export" title="Download current view as PNG">${ICON_DOWNLOAD}</button>
           <button class="oc-ctrl" id="oc-dock-toggle" title="Toggle docked/full-screen">⊟</button>
           <button class="oc-close" id="oc-close" title="Close (Esc)">✕</button>
         </div>
@@ -91,6 +101,14 @@ html, body, #app {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+
+/* macOS in full-screen mode: the iframe covers the whole window, so the
+   native window controls (traffic lights, ~70px wide at top-left) draw on
+   top of our toolbar. Reserve that space so they don't occlude the first
+   view button. Docked mode doesn't need this — the iframe is on the right. */
+.oc-fullscreen.oc-platform-mac .oc-toolbar {
+  padding-left: 84px;
 }
 
 .oc-views {
@@ -221,6 +239,10 @@ html, body, #app {
   border-color: var(--oc-border2);
   color: var(--oc-text);
 }
+
+.oc-ctrl--icon svg {
+  display: block;
+}
 `;
 
 /** Update the active view button in the toolbar */
@@ -247,4 +269,19 @@ export function updateDockButton(isDocked: boolean): void {
     btn.textContent = isDocked ? "⊞" : "⊟";
     btn.title = isDocked ? "Expand to full-screen" : "Dock to right side";
   }
+}
+
+/** Detect macOS so we can reserve space for native window controls in full-screen mode. */
+export function applyPlatformClass(): void {
+  try {
+    const p = (navigator as { platform?: string }).platform ?? "";
+    if (/Mac|iPhone|iPad/.test(p)) {
+      document.documentElement.classList.add("oc-platform-mac");
+    }
+  } catch { /* navigator unavailable — skip */ }
+}
+
+/** Toggle the fullscreen class so platform-specific CSS (traffic-light padding) kicks in. */
+export function updateFullscreenClass(isDocked: boolean): void {
+  document.documentElement.classList.toggle("oc-fullscreen", !isDocked);
 }

@@ -1,4 +1,4 @@
-import type { TreeNode, LayoutResult, RenderElement } from "../types";
+import type { TreeNode, LayoutResult, RenderElement, Rect } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight, adaptiveWidth } from "../text";
 
@@ -34,6 +34,7 @@ function subtreeWidth(node: TreeNode): number {
 /** Mind Map: bilateral layout — branches split left/right, recursive depth */
 export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
+  const nodeRectsByUuid = new Map<string, Rect>();
   const br = root.children;
 
   const rightBr = br.slice(0, Math.ceil(br.length / 2));
@@ -66,6 +67,14 @@ export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
     text: root.name, textColor: ROOT_TEXT(), textSize: 16, textWeight: 700,
     uuid: root.uuid,
   });
+  if (root.uuid) {
+    nodeRectsByUuid.set(root.uuid, {
+      x: rootCx - rootSize.w / 2,
+      y: centerY - rootSize.h / 2,
+      w: rootSize.w,
+      h: rootSize.h,
+    });
+  }
 
   function layoutSubtree(
     node: TreeNode,
@@ -92,6 +101,7 @@ export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
       dash: isLeaf ? c.dash : undefined,
       uuid: node.uuid,
     });
+    if (node.uuid) nodeRectsByUuid.set(node.uuid, { x, y: boxY, w, h });
 
     if (node.children.length) {
       const childrenTotalH = node.children.reduce((s, c2) => s + subtreeHeight(c2), 0)
@@ -160,5 +170,6 @@ export function layoutMindMap(root: TreeNode, _maxDepth: number): LayoutResult {
   return {
     elements: els,
     bounds: { x: 0, y: 0, w: totalW, h: maxH + 100 },
+    nodeRectsByUuid,
   };
 }

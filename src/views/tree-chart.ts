@@ -1,4 +1,4 @@
-import type { TreeNode, LayoutResult, RenderElement } from "../types";
+import type { TreeNode, LayoutResult, RenderElement, Rect } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight, adaptiveWidth } from "../text";
 
@@ -27,6 +27,7 @@ function subtreeHeight(node: TreeNode): number {
 /** Tree Chart: recursive layout with root top-left, branches flowing right */
 export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
+  const nodeRectsByUuid = new Map<string, Rect>();
   let maxX = 0;
 
   function layoutNode(
@@ -66,6 +67,7 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
       dash: isLeaf ? c.dash : undefined,
       uuid: node.uuid,
     });
+    if (node.uuid) nodeRectsByUuid.set(node.uuid, { x, y: boxY, w, h });
 
     maxX = Math.max(maxX, x + w);
 
@@ -106,5 +108,9 @@ export function layoutTreeChart(root: TreeNode, _maxDepth: number): LayoutResult
   }
 
   const result = layoutNode(root, 25, 25, 0);
-  return { elements: els, bounds: { x: 0, y: 0, w: maxX + 40, h: result.height + 50 } };
+  return {
+    elements: els,
+    bounds: { x: 0, y: 0, w: maxX + 40, h: result.height + 50 },
+    nodeRectsByUuid,
+  };
 }

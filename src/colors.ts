@@ -50,6 +50,10 @@ export interface Theme {
   accentText: string;
   /** Spine dot inner fill */
   spineDotInner: string;
+  /** Connector overlay: depends_on edge (solid + arrowhead) */
+  connectorDepends: string;
+  /** Connector overlay: relates_to edge (dashed, no arrow) */
+  connectorRelates: string;
   /** Branch colors */
   colors: BranchColor[];
 }
@@ -95,6 +99,8 @@ const DARK_THEME: Theme = {
   accentDim: "#46a75820",
   accentText: "#7ccf8e",
   spineDotInner: "#0d0f14",
+  connectorDepends: "#f76800d8",
+  connectorRelates: "#a8a8b2a0",
   colors: DARK_COLORS,
 };
 
@@ -117,6 +123,8 @@ const LIGHT_THEME: Theme = {
   accentDim: "#46a75818",
   accentText: "#2d7a30",
   spineDotInner: "#f8f9fa",
+  connectorDepends: "#c44d00d8",
+  connectorRelates: "#555568a0",
   colors: LIGHT_COLORS,
 };
 

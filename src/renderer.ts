@@ -94,7 +94,29 @@ function drawLine(
   ctx.lineTo(el.x2, el.y2);
   ctx.strokeStyle = el.color;
   ctx.lineWidth = el.lw;
+  if (el.dash) ctx.setLineDash(el.dash);
   ctx.stroke();
+  if (el.dash) ctx.setLineDash([]);
+
+  if (el.arrowEnd) drawArrowHead(ctx, el.x1, el.y1, el.x2, el.y2, el.color, el.lw);
+}
+
+/** Filled arrowhead at (x2, y2) pointing along the (x1,y1)→(x2,y2) direction. */
+function drawArrowHead(
+  ctx: CanvasRenderingContext2D,
+  x1: number, y1: number, x2: number, y2: number,
+  color: string, lw: number
+): void {
+  const angle = Math.atan2(y2 - y1, x2 - x1);
+  const len = Math.max(8, lw * 5);
+  const spread = Math.PI / 7;
+  ctx.beginPath();
+  ctx.moveTo(x2, y2);
+  ctx.lineTo(x2 - len * Math.cos(angle - spread), y2 - len * Math.sin(angle - spread));
+  ctx.lineTo(x2 - len * Math.cos(angle + spread), y2 - len * Math.sin(angle + spread));
+  ctx.closePath();
+  ctx.fillStyle = color;
+  ctx.fill();
 }
 
 function drawCurve(
@@ -106,7 +128,12 @@ function drawCurve(
   ctx.bezierCurveTo(el.cx1, el.cy1, el.cx2, el.cy2, el.x2, el.y2);
   ctx.strokeStyle = el.color;
   ctx.lineWidth = el.lw;
+  if (el.dash) ctx.setLineDash(el.dash);
   ctx.stroke();
+  if (el.dash) ctx.setLineDash([]);
+
+  // Arrowhead tangent to the curve: use the cp2 → endpoint vector as direction.
+  if (el.arrowEnd) drawArrowHead(ctx, el.cx2, el.cy2, el.x2, el.y2, el.color, el.lw);
 }
 
 function drawText(
