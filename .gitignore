@@ -5,6 +5,11 @@ dist/
 coverage/
 .playwright-cli/
 
+# Build caches
+.vite/
+.eslintcache
+*.cache
+
 # Env / local overrides
 .env*
 *.local.json
@@ -13,13 +18,18 @@ coverage/
 # Scratch / tmp
 tmp/
 scratch/
+*.tmp
 
 # OS / editor
 .DS_Store
 Thumbs.db
 .idea/
 .vscode/*.code-workspace
+*.swp
+*~
 
-# Agent artifacts
+# Agent artifacts (note: AGENTS.md is tracked — these are local-only stores)
 .claude/
 .aider/
+.cursor/
+.codeium/

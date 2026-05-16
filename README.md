@@ -33,10 +33,33 @@ A Logseq plugin that transforms hierarchical block trees into interactive visual
 
 ### Interaction
 
-- **Click any node** to navigate to that block in the Logseq editor
+- **Click any node** to navigate to that block in the Logseq editor (and focus its relationships — see below)
 - **View switching** with fade animation between all 8 views
 - **Treemap breadcrumbs** — hover any cell to see its full hierarchy path
 - **Fit-to-view** resets zoom to show the entire diagram
+
+### Relationship Connectors
+
+Visualize cross-hierarchy relationships between blocks using two user-created DB properties of type `:node`:
+
+- **`relates_to`** — symmetric association (dashed gray line)
+- **`depends_on`** — directional dependency (solid orange arrow)
+
+Create the properties once on any block via Logseq's property UI, then assign other blocks as their values. OutlineCanvas surfaces them in **Tree Chart**, **Right Tree**, and **Mind Map** views with a lazy-edges UX:
+
+- **At rest**: clean tree, no edges. Every node carrying refs shows small corner badges — `→N` outgoing (orange), `←N` incoming (gray).
+- **Click a node**: the node gets an accent halo; its outgoing + incoming edges fade in. Click another node = focus switches. Click empty canvas = unfocus.
+- **Stacked-column routing**: when source and target sit in the same column, the bezier arcs outward instead of slicing through intermediate boxes.
+- **Optional labels**: enable **Label Relationship Connectors** in settings to show the property name (`depends_on` / `relates_to`) as a small pill at each curve's midpoint.
+
+Connectors only draw between nodes already visible in the rendered subtree — external refs are dropped silently.
+
+### Export
+
+Two toolbar buttons capture the current view as a PNG (WYSIWYG — current pan/zoom, all edges visible regardless of focus):
+
+- **⬇ Download** — saves `outline-canvas-<view>-<timestamp>.png` to your downloads folder
+- **📋 Copy** — writes the image to your clipboard for pasting into any block or document
 
 ### Docked & Full-Screen Modes
 
@@ -64,7 +87,7 @@ Automatically adapts to Logseq's light and dark themes. Switches live when you t
 
 - **Deuteranopia-safe** color palette — no red-green adjacency
 - **Unique dash patterns** per branch color for color-blind users
-- **WCAG 2.1 AA** contrast ratios (4.5:1 minimum) on all text
+- **WCAG 2.1 AA** contrast ratios (4.5:1 minimum) on all text; relationship connector overlays target the 3:1 graphical-element ratio
 - **Keyboard navigation**: arrows to pan, +/- to zoom, 0 to fit, Esc to close
 
 ## Installation
@@ -72,8 +95,8 @@ Automatically adapts to Logseq's light and dark themes. Switches live when you t
 ### From source (development)
 
 ```bash
-git clone https://github.com/logseq-dev/logseq-plugin-outline-canvas
-cd logseq-plugin-outline-canvas
+git clone https://github.com/hdansou/logseq-outline-canvas
+cd logseq-outline-canvas
 npm install
 npm run dev
 ```
@@ -108,6 +131,8 @@ Output goes to `dist/`.
 | Depth Mode | `recursive` | `recursive`: independent nodes per level. `flat`: breadcrumb leaf labels |
 | Show Empty Blocks | `false` | Include blocks with no title |
 | Animate View Transitions | `true` | Fade animation when switching views |
+| Show Relationship Connectors | `true` | Master toggle for `relates_to` / `depends_on` overlays (edges, badges, halo, labels) |
+| Label Relationship Connectors | `false` | Show the property name as a small pill at the midpoint of each visible connector |
 
 ## Tech Stack
 
