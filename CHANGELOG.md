@@ -2,6 +2,35 @@
 
 All notable changes to OutlineCanvas are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [1.1.0] — 2026-05-16
+
+First feature release after the marketplace launch. Introduces cross-hierarchy relationship visualization, PNG export, and matching toolbar iconography. 64 unit tests pass; `npm audit` clean.
+
+### Added
+
+- Node relationship connectors with lazy-edges + badges UX. Two user-created DB properties of type `:node` — `relates_to` and `depends_on` — surface in Tree Chart, Right Tree, and Mind Map views:
+  - **Badges** (always visible): every node with relationships gets corner annotations — `→N` top-right for outgoing, `←N` bottom-right for incoming. Signals "this node participates in relationships" at a glance without cluttering the canvas.
+  - **Lazy edges** (on click): edges are hidden at rest. Clicking a node focuses it — the node gets an accent halo and *only its* edges fade in (`depends_on` = solid arrowed bezier; `relates_to` = dashed bezier). Clicking empty canvas clears the focus. Both interactions preserve the existing click-to-navigate behavior.
+  - **Stacked-column routing**: when source and target share an x-range (vertical stack), the bezier arcs outward to the right instead of slicing through intermediate boxes.
+  - **Optional labels** (`showRelationshipLabels`, off by default): renders the property name as a small pill at each visible curve's midpoint. Useful as a visual cue at first; turn off once line styles become familiar.
+- Property extraction tolerates DB-graph realities: top-level namespaced keys (`user.property/foo-XYZ`), leading-colon keys (`:user.property/foo-XYZ`), `.properties` sub-object, and ref values shaped as bare UUID / `{block/uuid}` / `{uuid}` / `{id: <number>}` (numeric `:db/id` resolved via `Editor.getBlock`, cached per build). Match by ident prefix, not title, so renames keep working.
+- **PNG export from the toolbar.** New ⬇ download button saves `outline-canvas-<view>-<timestamp>.png` to your downloads folder. New 📋 copy button writes the image to the system clipboard via `navigator.clipboard.write`. Both render WYSIWYG — current pan/zoom + all edges always + labels follow setting + no badges/halo/chrome. Icons are inlined Tabler Icons SVGs matching Logseq's iconography.
+- Static PNG macro renderer surfaces badges (but not edges, since there's no interaction surface). Clicking the inline image opens the interactive view.
+- `showRelationships` setting (default on) hides badges + halo + edges + labels in one toggle.
+- `AGENTS.md` — operational landmines and workflow expectations for agents working on the repo.
+
+### Fixed
+
+- macOS full-screen mode: toolbar now reserves 84 px on the left so the native window controls (traffic lights) no longer overlay the first view button.
+
+### Changed
+
+- `src/index.ts` now splits layout-compute (camera-resetting) from element composition (cheap, used on focus changes), so clicking a node to focus its relationships no longer resets pan/zoom.
+- `src/offscreen.ts`: extracted a private `renderElementsToDataURL` primitive that both the macro renderer and the live export share, removing canvas-setup duplication.
+- Deduped the `LogseqBlock` interface — exported from `adapter.ts` and imported into `index.ts` (was declared twice with slightly different shapes).
+- Removed dev-banner `console.log("OutlineCanvas loaded!/ready!")` calls from plugin init.
+- `.gitignore` expanded: `.vite/`, `.eslintcache`, `*.cache`, `*.tmp`, `*.swp`, `*~`, `.cursor/`, `.codeium/`. `AGENTS.md` is deliberately tracked, unlike the agent-state directories.
+
 ## [1.0.1] — 2026-05-15
 
 ### Fixed
