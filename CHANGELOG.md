@@ -2,7 +2,7 @@
 
 All notable changes to OutlineCanvas are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
-## [Unreleased]
+## [1.2.0] — 2026-05-17
 
 Docked-mode rework so the canvas and Logseq's right sidebar coexist as independent panels instead of fighting for the same slot.
 
