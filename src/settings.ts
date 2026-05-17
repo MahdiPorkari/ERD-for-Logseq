@@ -1,6 +1,7 @@
 import type { ViewId } from "./types";
 
 export type DepthMode = "recursive" | "flat";
+export type DockBehavior = "mirror" | "overlay";
 
 export interface PluginSettings {
   defaultView: ViewId;
@@ -10,7 +11,12 @@ export interface PluginSettings {
   animateViewSwitch: boolean;
   showRelationships: boolean;
   showRelationshipLabels: boolean;
+  dockBehavior: DockBehavior;
+  dockWidth: number;
 }
+
+export const DOCK_WIDTH_MIN = 20;
+export const DOCK_WIDTH_MAX = 70;
 
 export const DEFAULTS: PluginSettings = {
   defaultView: "tree",
@@ -20,6 +26,8 @@ export const DEFAULTS: PluginSettings = {
   animateViewSwitch: true,
   showRelationships: true,
   showRelationshipLabels: false,
+  dockBehavior: "mirror",
+  dockWidth: 40,
 };
 
 export function registerSettings(): void {
@@ -90,6 +98,23 @@ export function registerSettings(): void {
       description:
         "Display the property name ('depends_on' / 'relates_to') as a small pill at the midpoint of each connector. Useful as a visual cue at first; turn off once the line styles are familiar.",
     },
+    {
+      key: "dockBehavior",
+      type: "enum",
+      enumChoices: ["mirror", "overlay"],
+      enumPicker: "select",
+      default: DEFAULTS.dockBehavior,
+      title: "Dock Behavior",
+      description:
+        "Mirror: canvas reserves its strip in the host layout so the right sidebar opens to the left of the canvas. Overlay: canvas floats above the app without resizing it, sidebar opens under it. In both modes the sidebar can be toggled (T R) independently — the canvas only closes via ✕ or Escape.",
+    },
+    {
+      key: "dockWidth",
+      type: "number",
+      default: DEFAULTS.dockWidth,
+      title: "Canvas Width (vw)",
+      description: `Width of the docked canvas as a percentage of the viewport (${DOCK_WIDTH_MIN}–${DOCK_WIDTH_MAX}). Drag the left edge of the canvas to adjust live; this number is the persisted value.`,
+    },
   ]);
 }
 
@@ -111,5 +136,14 @@ export function getSettings(): PluginSettings {
     showRelationshipLabels:
       (logseq.settings?.showRelationshipLabels as boolean) ??
       DEFAULTS.showRelationshipLabels,
+    dockBehavior:
+      (logseq.settings?.dockBehavior as DockBehavior) ?? DEFAULTS.dockBehavior,
+    dockWidth: Math.max(
+      DOCK_WIDTH_MIN,
+      Math.min(
+        DOCK_WIDTH_MAX,
+        (logseq.settings?.dockWidth as number) ?? DEFAULTS.dockWidth
+      )
+    ),
   };
 }

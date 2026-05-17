@@ -26,7 +26,10 @@ A Logseq DB plugin that renders hierarchical block trees as interactive visual d
 - All rendering goes through a flat `RenderElement[]` array drawn by `renderer.ts`
 - `adaptiveWidth()` computes node width from text length (wider for longer text, ~4 lines target)
 - Pan/zoom is a transform applied at render time, not a layout recalculation
-- Docked mode: opens Logseq's right sidebar, overlays iframe on `#right-sidebar-container`
+- Docked mode has two variants gated by the `dockBehavior` setting. Both use the same fixed 40vw iframe strip on the right; they differ in what they do to the host layout:
+  - `mirror` (default): host CSS adds `margin-right: 40vw` to `#app-container-wrapper` so the canvas's strip is **reserved** in the host layout. The right sidebar lives inside that wrapper, so toggling it (T R) opens it to the *left* of the canvas, not under it. The toolbar's "Toggle right sidebar" button is hidden via CSS so its icon doesn't sit flush against the canvas edge (T R still works).
+  - `overlay`: standalone fixed strip (z-index 11) that does not touch the host layout — sidebar can open under the canvas. Use when you want the canvas to float on top without resizing the app.
+  - Sidebar toggle is independent of canvas visibility in both modes — canvas only closes via ✕ or Escape. Settings-change re-injects the host CSS via `provideStyle({key, style})` so the reserve-space rule is dropped/restored without a reload.
 - Full-screen mode: fixed overlay covering entire viewport
 - Inline macro: `{{renderer :outline-canvas}}` renders static PNG via off-screen canvas
 - Theme: `theme()` returns active palette; `setTheme()` switches; views read semantic tokens

@@ -23,6 +23,7 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
 
   return `
     <div class="oc-root">
+      <div class="oc-resize-handle" id="oc-resize-handle" title="Drag to resize canvas"></div>
       <div class="oc-toolbar">
         <div class="oc-views">${viewButtons}</div>
         <div class="oc-toolbar-right">
@@ -91,6 +92,29 @@ html, body, #app {
   font-family: -apple-system, 'SF Pro', system-ui, sans-serif;
   color: var(--oc-text);
   overflow: hidden;
+  position: relative;
+}
+
+/* Drag handle along the iframe's left edge. Slim (5px) so it doesn't intrude
+   on content; widens visually on hover. Hidden in full-screen mode where
+   width is fixed at 100vw. */
+.oc-resize-handle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 5px;
+  height: 100%;
+  cursor: ew-resize;
+  z-index: 200;
+  background: transparent;
+  transition: background 0.12s;
+}
+.oc-resize-handle:hover,
+.oc-resize-handle.oc-dragging {
+  background: var(--oc-accent-dim);
+}
+.oc-fullscreen .oc-resize-handle {
+  display: none;
 }
 
 .oc-toolbar {

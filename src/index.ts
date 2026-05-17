@@ -1,6 +1,6 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
-import { registerSettings, getSettings } from "./settings";
+import { registerSettings, getSettings, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
 import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
@@ -198,60 +198,31 @@ function switchView(viewId: ViewId): void {
 
 // --- Dock / Full-screen mode ---
 
-let sidebarWasOpen = false;
-let dockRefineTimer: ReturnType<typeof setTimeout> | null = null;
 
-function setDockedStyle(): void {
-  // Default geometry: right 40vw stripe. parent.document access is blocked
-  // cross-origin for web-URL-installed plugins, so we silently fall back.
-  // For same-origin installs (dotdir), we refine to the sidebar's exact rect.
-  let geom: Partial<CSSStyleDeclaration> = {
+function setDockedStyle(widthOverridePx?: number): void {
+  // Both modes share the same fixed strip on the right. The difference is
+  // host-side: mirror mode reserves this strip in the app layout via
+  // injectHostStyles (so the sidebar opens to the left of it); overlay mode
+  // doesn't reserve space — the canvas just floats above app content.
+  // widthOverridePx is supplied during a live drag; otherwise we use the
+  // persisted dockWidth (vw).
+  const { dockBehavior, dockWidth } = getSettings();
+  const width = widthOverridePx !== undefined ? `${widthOverridePx}px` : `${dockWidth}vw`;
+  setContainerStyle({
+    position: "fixed",
+    zIndex: dockBehavior === "mirror" ? "999" : "11",
     top: "0",
     right: "0",
     left: "auto",
-    width: "40vw",
+    width,
     height: "100vh",
-  };
-  try {
-    const sidebar = parent.document.getElementById("right-sidebar-container");
-    if (sidebar && sidebar.offsetWidth > 50) {
-      const rect = sidebar.getBoundingClientRect();
-      geom = {
-        top: `${Math.round(rect.top)}px`,
-        left: `${Math.round(rect.left)}px`,
-        right: "auto",
-        width: `${Math.round(rect.width)}px`,
-        height: `${Math.round(rect.height)}px`,
-      };
-    }
-  } catch { /* cross-origin — stick with 40vw fallback */ }
-  setContainerStyle({ position: "fixed", zIndex: "999", borderLeft: "none", ...geom });
+    borderLeft: "none",
+  });
 }
 
 async function applyDockMode(): Promise<void> {
-  if (dockRefineTimer) {
-    clearTimeout(dockRefineTimer);
-    dockRefineTimer = null;
-  }
   if (isDocked) {
-    // Remember if sidebar was already open
-    sidebarWasOpen = await isSidebarOpen();
-
-    // Open Logseq's right sidebar so the app layout makes room for our iframe.
-    // The provideStyle :has() rule auto-hides the sidebar contents while our
-    // iframe is visible — no DOM mutation needed (iframe is cross-origin).
-    logseq.App.setRightSidebarVisible(true);
-
-    // Set initial position immediately (visible right away)
     setDockedStyle();
-
-    // Refine position after sidebar finishes opening
-    dockRefineTimer = setTimeout(() => {
-      dockRefineTimer = null;
-      if (!isDocked) return;
-      setDockedStyle();
-      if (currentTree) rebuildLayout();
-    }, 300);
   } else {
     // Full-screen mode
     setContainerStyle({
@@ -264,7 +235,6 @@ async function applyDockMode(): Promise<void> {
       height: "100vh",
       borderLeft: "none",
     });
-    // (Sidebar auto-unhides when our iframe loses its .visible class)
   }
   updateDockButton(isDocked);
   updateFullscreenClass(isDocked);
@@ -273,20 +243,134 @@ async function applyDockMode(): Promise<void> {
   }, 100);
 }
 
-async function isSidebarOpen(): Promise<boolean> {
-  try {
-    const sidebar = parent.document.getElementById("right-sidebar-container");
-    return sidebar !== null && sidebar.offsetWidth > 0;
-  } catch {
-    return false;
-  }
+/**
+ * Inject host-side CSS. The reserve-space rule (margin-right on
+ * #app-container-wrapper) and the toggle-button hide are mirror-only —
+ * overlay mode leaves the host layout untouched so the sidebar can coexist
+ * with the canvas under default Logseq behavior.
+ *
+ * Re-callable: uses provideStyle's {key,style} form so re-injection replaces
+ * the previous rule when dockBehavior changes.
+ */
+function injectHostStyles(pluginId: string, widthOverridePx?: number): void {
+  const { dockBehavior, dockWidth } = getSettings();
+  // Mirror mode reserves the canvas's right-edge strip in the host layout, so
+  // Logseq's right sidebar opens to the LEFT of the canvas instead of sliding
+  // under it. We shrink #app-container-wrapper (the root layout element) by
+  // the canvas width via margin-right. The sidebar lives inside that wrapper,
+  // so it naturally fits in the remaining space.
+  //
+  // Also hide the toolbar's "Toggle right sidebar" button so its icon doesn't
+  // sit flush against the canvas's left edge — T R keyboard shortcut still
+  // toggles the sidebar.
+  //
+  // widthOverridePx is used during a live resize drag; skip the transition so
+  // the host follows the pointer 1:1 rather than animating per frame.
+  const width = widthOverridePx !== undefined ? `${widthOverridePx}px` : `${dockWidth}vw`;
+  const transition = widthOverridePx !== undefined ? "none" : "margin-right 0.2s ease";
+  const hostHas = `body:has(.lsp-iframe-sandbox-container.visible[data-pid="${pluginId}"])`;
+  const sidebarHide =
+    dockBehavior === "mirror"
+      ? `${hostHas} #app-container-wrapper {
+           margin-right: ${width} !important;
+           transition: ${transition};
+         }
+         ${hostHas} [title^="Toggle right sidebar"] {
+           visibility: hidden !important;
+         }`
+      : "";
+
+  logseq.provideStyle({
+    key: "outline-canvas-host",
+    style: `
+      .outline-canvas-btn {
+        display: flex;
+        align-items: center;
+      }
+      ${sidebarHide}
+      .outline-canvas-inline {
+        width: 100%;
+        padding: 8px 0;
+        cursor: pointer;
+      }
+      .outline-canvas-inline img {
+        width: 100%;
+        height: auto;
+        border-radius: 8px;
+        border: 1px solid var(--ls-border-color, #333);
+        transition: border-color 0.15s;
+      }
+      .outline-canvas-inline img:hover {
+        border-color: var(--ls-link-ref-text-color, #46a758);
+      }
+      .outline-canvas-inline .oc-inline-label {
+        font-size: 11px;
+        color: var(--ls-secondary-text-color, #888);
+        margin-top: 4px;
+        text-align: center;
+      }
+    `,
+  });
 }
 
 function hideCanvas(): void {
   logseq.hideMainUI({ restoreEditingCursor: true });
-  if (isDocked && !sidebarWasOpen) {
-    logseq.App.setRightSidebarVisible(false);
-  }
+  // The host CSS rule's :has() condition stops matching once the iframe loses
+  // .visible, so the margin-right on #app-container-wrapper is dropped and the
+  // app expands back. No sidebar bookkeeping needed.
+}
+
+/**
+ * Live drag-to-resize on the canvas's left edge. We can't read the parent
+ * viewport width directly (cross-origin), so derive it once at drag-start from
+ * `iframeWidthPx / (dockWidthVw / 100)`. During the drag we apply pixel
+ * widths to both the iframe and the host margin-right; on release we convert
+ * the final px back to vw and persist via updateSettings.
+ *
+ * pointerdown captures the pointer to the handle, and because we keep the
+ * iframe's left edge under the cursor as we shrink/grow, the cursor never
+ * leaves the iframe — events continue to flow even when dragging across what
+ * would otherwise be the parent-frame boundary.
+ */
+function setupResizeHandle(pluginId: string): void {
+  const handle = document.getElementById("oc-resize-handle");
+  if (!handle) return;
+
+  let drag: { parentViewportPx: number; currentPx: number } | null = null;
+
+  handle.addEventListener("pointerdown", (e) => {
+    if (!isDocked) return;
+    e.preventDefault();
+    handle.setPointerCapture(e.pointerId);
+    handle.classList.add("oc-dragging");
+    const startVw = getSettings().dockWidth;
+    const currentPx = window.innerWidth;
+    const parentViewportPx = currentPx / (startVw / 100);
+    drag = { parentViewportPx, currentPx };
+  });
+
+  handle.addEventListener("pointermove", (e) => {
+    if (!drag) return;
+    const minPx = drag.parentViewportPx * (DOCK_WIDTH_MIN / 100);
+    const maxPx = drag.parentViewportPx * (DOCK_WIDTH_MAX / 100);
+    const next = Math.max(minPx, Math.min(maxPx, drag.currentPx - e.movementX));
+    drag.currentPx = next;
+    setDockedStyle(next);
+    injectHostStyles(pluginId, next);
+  });
+
+  const endDrag = (e: PointerEvent): void => {
+    if (!drag) return;
+    handle.releasePointerCapture(e.pointerId);
+    handle.classList.remove("oc-dragging");
+    const finalVw = Math.round((drag.currentPx / drag.parentViewportPx) * 100);
+    drag = null;
+    // updateSettings triggers onSettingsChanged, which re-injects the host
+    // CSS (now in vw, with the transition restored) and re-applies dock mode.
+    logseq.updateSettings({ dockWidth: finalVw });
+  };
+  handle.addEventListener("pointerup", endDrag);
+  handle.addEventListener("pointercancel", endDrag);
 }
 
 function toggleDockMode(): void {
@@ -492,45 +576,10 @@ async function main(): Promise<void> {
   });
   if (typeof offTheme === "function") offHooks.push(offTheme);
 
-  // CSS — injected into parent frame
+  // CSS — injected into parent frame. The sidebar-hide rule is gated on
+  // dockBehavior, so we re-inject on settings change using the same key.
   const pluginId = (logseq as { baseInfo?: { id?: string } }).baseInfo?.id ?? "";
-  logseq.provideStyle(`
-    .outline-canvas-btn {
-      display: flex;
-      align-items: center;
-    }
-    /* Hide Logseq's right sidebar while our plugin iframe is visible. The
-       iframe is cross-origin from Logseq when installed from a URL, so we
-       can't mutate the parent DOM; this host-side :has() rule reacts to the
-       container's .visible class automatically. Required for click-through:
-       .cp__right-sidebar-topbar has -webkit-app-region: drag which silently
-       eats clicks on macOS, so hiding the sidebar is what keeps the right-
-       side toolbar buttons (maximize, close) clickable. */
-    body:has(.lsp-iframe-sandbox-container.visible[data-pid="${pluginId}"]) #right-sidebar {
-      visibility: hidden !important;
-    }
-    .outline-canvas-inline {
-      width: 100%;
-      padding: 8px 0;
-      cursor: pointer;
-    }
-    .outline-canvas-inline img {
-      width: 100%;
-      height: auto;
-      border-radius: 8px;
-      border: 1px solid var(--ls-border-color, #333);
-      transition: border-color 0.15s;
-    }
-    .outline-canvas-inline img:hover {
-      border-color: var(--ls-link-ref-text-color, #46a758);
-    }
-    .outline-canvas-inline .oc-inline-label {
-      font-size: 11px;
-      color: var(--ls-secondary-text-color, #888);
-      margin-top: 4px;
-      text-align: center;
-    }
-  `);
+  injectHostStyles(pluginId);
 
   // Inject styles into plugin iframe
   const styleEl = document.createElement("style");
@@ -545,6 +594,7 @@ async function main(): Promise<void> {
 
   // Build UI
   setupUI();
+  setupResizeHandle(pluginId);
   applyThemeToUI();
   applyPlatformClass();
 
@@ -695,8 +745,21 @@ async function main(): Promise<void> {
   });
   if (typeof offChanged === "function") offHooks.push(offChanged);
 
-  // Settings change
+  // Settings change — re-inject host CSS + re-apply dock geometry when either
+  // the dock behavior or the dock width changes (drag end persists dockWidth,
+  // which lands here).
+  let prevDockBehavior = getSettings().dockBehavior;
+  let prevDockWidth = getSettings().dockWidth;
   logseq.onSettingsChanged(() => {
+    const { dockBehavior: nextBehavior, dockWidth: nextWidth } = getSettings();
+    if (nextBehavior !== prevDockBehavior || nextWidth !== prevDockWidth) {
+      prevDockBehavior = nextBehavior;
+      prevDockWidth = nextWidth;
+      injectHostStyles(pluginId);
+      if (logseq.isMainUIVisible && isDocked) {
+        applyDockMode();
+      }
+    }
     if (logseq.isMainUIVisible) {
       rebuildLayout();
     }
