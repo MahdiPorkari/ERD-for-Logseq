@@ -2,6 +2,33 @@
 
 **Last Updated:** 2026-05-16
 
+## Production-hardening pass (2026-05-16)
+
+Ran `/production-readiness` after the dock-mode rework. Baseline clean: 64 tests pass, typecheck + build green, `npm audit` reports 0 vulnerabilities. `.gitignore` and dev-server binding still aligned with the v1.0.0 pass.
+
+**Applied:** C1 (CHANGELOG `[Unreleased]` section describing `dockBehavior`, `dockWidth`, drag handle), C2 (README docked-mode section rewritten to match the new behavior).
+
+**Deferred:** B1 — decompose `src/index.ts` (778 lines) into `dock-mode.ts` / `macro-renderer.ts` / `event-wiring.ts`. Not urgent; pick up in a focused session.
+
+## Completed (unreleased)
+
+### Feature: dockWidth setting + drag handle (2026-05-16)
+Users couldn't trade canvas width for sidebar room. Added a live drag handle and a persisted vw value.
+- [x] New `dockWidth` setting (vw, default 40, clamped 20–70) drives both the iframe width and the host `margin-right`
+- [x] Drag handle (5px strip on iframe left edge) with `setPointerCapture`; uses `e.movementX` to accumulate pixel delta (immune to iframe-repositioning-during-drag)
+- [x] Parent viewport size derived once at drag-start from `iframeWidthPx / (currentVw / 100)` so we can convert px → vw on release
+- [x] During drag: re-injects host CSS with px width and `transition: none`; on release: `updateSettings` persists vw, settings-change handler re-injects with vw + transition restored
+- [x] Handle hidden in full-screen mode (`.oc-fullscreen .oc-resize-handle { display: none }`)
+
+### Feature: dockBehavior setting — mirror vs overlay (2026-05-16)
+Docked mode previously force-opened Logseq's right sidebar and overlaid the iframe on top of it, hiding sidebar contents via CSS. Result: T R would expand the sidebar *under* the canvas. The new model reserves the canvas's strip in the host layout so the sidebar opens *beside* the canvas.
+- [x] New `dockBehavior` setting: `"mirror"` (default — reserves canvas's 40vw strip via `margin-right` on `#app-container-wrapper`, sidebar opens to its left) or `"overlay"` (standalone fixed strip z-index 11, app layout untouched, sidebar opens under canvas)
+- [x] `setDockedStyle` now uses the same fixed `right:0; width:40vw` geometry in both modes; differentiation lives in `injectHostStyles`
+- [x] Dropped force-open-sidebar, sidebarWasOpen tracking, dock refine timer, and `isSidebarOpen` (parent.document inspection no longer needed)
+- [x] Mirror mode also hides the toolbar's "Toggle right sidebar" button via CSS so its icon doesn't sit flush against the canvas edge — T R keyboard shortcut still toggles
+- [x] Sidebar toggle (T R / button) is independent of canvas in both modes — canvas only closes via ✕ or Escape
+- [x] Host CSS is built by `injectHostStyles()` and re-injected via `provideStyle({key,style})` on settings change, so the rules are dropped/restored without a reload
+
 ## Released
 
 ### v1.0.1 — bug fix release (2026-05-15)

@@ -2,6 +2,28 @@
 
 All notable changes to OutlineCanvas are documented here. Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versioning follows [SemVer](https://semver.org/).
 
+## [Unreleased]
+
+Docked-mode rework so the canvas and Logseq's right sidebar coexist as independent panels instead of fighting for the same slot.
+
+### Added
+
+- **`dockBehavior` setting** — choose how the docked canvas interacts with the host layout:
+  - **`mirror`** (default): the canvas reserves its strip in the app layout via host CSS (`margin-right` on `#app-container-wrapper`). Toggling the right sidebar (T R, button, or `setRightSidebarVisible`) opens it to the *left* of the canvas instead of sliding under it.
+  - **`overlay`**: the canvas floats above the app as a fixed strip on the right (z-index 11) and does not resize the host. The sidebar opens under the canvas. Use when you want the canvas to overlay without reflowing the page.
+- **`dockWidth` setting** — width of the docked canvas as a percentage of the viewport (vw, default 40, clamped 20–70). Drives both the iframe width and the host's reserved strip in lock-step.
+- **Drag-to-resize handle** — a slim strip on the canvas's left edge. Drag it to resize the canvas live; the new width persists to `dockWidth` on release. Hidden in full-screen mode.
+
+### Changed
+
+- The right-sidebar toggle (T R / toolbar button) no longer closes the canvas in either mode — the canvas only closes via ✕ or Escape.
+- In mirror mode, the host toolbar's "Toggle right sidebar" button is hidden via CSS so its icon doesn't sit flush against the canvas's left edge. The T R keyboard shortcut still toggles the sidebar.
+- Host-side CSS is now re-injectable via `provideStyle({key, style})` so settings changes (`dockBehavior` / `dockWidth`) take effect without a reload.
+
+### Removed
+
+- Old "force-open right sidebar + overlay on top + hide sidebar contents" behavior of docked mode. The replacement (reserve-space via host CSS) is more predictable and lets the sidebar stay a usable panel while the canvas is open.
+
 ## [1.1.0] — 2026-05-16
 
 First feature release after the marketplace launch. Introduces cross-hierarchy relationship visualization, PNG export, and matching toolbar iconography. 64 unit tests pass; `npm audit` clean.

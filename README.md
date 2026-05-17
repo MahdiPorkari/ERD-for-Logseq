@@ -63,9 +63,16 @@ Two toolbar buttons capture the current view as a PNG (WYSIWYG — current pan/z
 
 ### Docked & Full-Screen Modes
 
-- **Docked mode** (default): canvas opens alongside the right sidebar — your notes stay visible on the left
-- **Full-screen mode**: canvas covers the entire viewport for maximum diagram space
-- Toggle between modes with the toolbar button or `Cmd+Shift+O`
+- **Docked mode** (default): canvas opens as a fixed strip on the right. Your notes stay visible on the left, and Logseq's right sidebar opens *beside* the canvas (not under it). Toggle the right sidebar freely with `T R` — it doesn't close the canvas.
+- **Full-screen mode**: canvas covers the entire viewport for maximum diagram space.
+- Toggle between docked and full-screen with the toolbar button or `Cmd+Shift+O`.
+
+**Adjusting the canvas width.** Drag the slim handle on the canvas's left edge to resize it live (between 20 % and 70 % of the viewport). The width persists across sessions as the `Canvas Width (vw)` plugin setting.
+
+**Dock behavior** — settable in plugin settings:
+
+- **`mirror`** (default): the canvas reserves its space in the app layout. The right sidebar opens to the left of the canvas without overlap.
+- **`overlay`**: the canvas floats above the app without resizing it. The right sidebar opens under the canvas. Useful if you'd rather keep the main content full-width and treat the canvas as a transient overlay.
 
 ### Inline Macro Renderer
 
