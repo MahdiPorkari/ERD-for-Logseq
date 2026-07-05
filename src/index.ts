@@ -17,6 +17,7 @@ import { layoutMindMap } from "./views/mind-map";
 import { layoutRightTree } from "./views/right-tree";
 import { layoutFishbone } from "./views/fishbone";
 import { layoutTreemap, treemapHitBoxes } from "./views/treemap";
+import { layoutERD } from "./views/erd";
 
 const VIEWS: ViewDef[] = [
   { id: "tree", label: "Tree Chart", icon: "⎅", layout: layoutTreeChart },
@@ -27,6 +28,7 @@ const VIEWS: ViewDef[] = [
   { id: "rtree", label: "Right Tree", icon: "⊳", layout: layoutRightTree },
   { id: "fish", label: "Fishbone", icon: "⟜", layout: layoutFishbone },
   { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
+  { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
 ];
 
 // Plugin state
