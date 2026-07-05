@@ -14,6 +14,7 @@ export interface TreeNode {
   depth: number;
   id: number;
   uuid: string;
+  properties?: { name: string; value: string }[];
   refs?: NodeRef[];
 }
 
@@ -128,7 +129,8 @@ export type ViewId =
   | "mind"
   | "rtree"
   | "fish"
-  | "tmap";
+  | "tmap"
+  | "erd";
 
 /** View registry entry */
 export interface ViewDef {

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep } from "./adapter";
+import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties } from "./adapter";
 import type { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -319,5 +319,96 @@ describe("flattenDeep preserves refs", () => {
     const pruned = flattenDeep(tree, 2, "recursive");
     const afterFilter = filterIntraTreeRefs(pruned);
     expect(afterFilter.children[0].refs ?? []).toEqual([]);
+  });
+});
+
+describe("extractDisplayProperties", () => {
+  const PROP_DUE = "user.property/due_date-ABC";
+  const PROP_STATUS = ":user.property/status-XYZ";
+  const PROP_TAGS = "user.property/tags";
+  const PROP_REL = "user.property/relates_to-123";
+  const UUID_A = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
+
+  const fetcher = vi.fn(async (id: string) => (id === UUID_A ? "Target Block" : null));
+  const idResolver = vi.fn(async (id: number) => (id === 99 ? UUID_A : null));
+  const idCache = new Map<number, string | null>();
+
+  it("extracts and formats string, number, and boolean properties", async () => {
+    const block = {
+      [PROP_DUE]: "2024-05-20",
+      properties: {
+        [PROP_STATUS]: "active",
+        "user.property/is_urgent": true,
+        "user.property/priority": 5,
+      },
+    };
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props).toEqual([
+      { name: "Due Date", value: "2024-05-20" },
+      { name: "Is Urgent", value: "Yes" },
+      { name: "Priority", value: "5" },
+      { name: "Status", value: "active" },
+    ]);
+  });
+
+  it("excludes relates_to and depends_on", async () => {
+    const block = {
+      [PROP_REL]: "some-uuid",
+      properties: {
+        "user.property/depends_on-456": "other-uuid",
+        "user.property/custom": "value",
+      },
+    };
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props).toEqual([{ name: "Custom", value: "value" }]);
+  });
+
+  it("resolves ref-shaped objects to titles", async () => {
+    const block = {
+      properties: {
+        "user.property/link": { "block/uuid": UUID_A },
+        "user.property/ref_id": { id: 99 },
+      },
+    };
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props).toEqual([
+      { name: "Link", value: "Target Block" },
+      { name: "Ref Id", value: "Target Block" },
+    ]);
+  });
+
+  it("formats arrays by joining formatted elements", async () => {
+    const block = {
+      properties: {
+        "user.property/list": ["a", 1, true, { uuid: UUID_A }],
+      },
+    };
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props).toEqual([
+      { name: "List", value: "a, 1, Yes, Target Block" },
+    ]);
+  });
+
+  it("dedups properties across top-level and .properties", async () => {
+    const block = {
+      "user.property/same-1": "top",
+      properties: {
+        "user.property/same-2": "nested",
+      },
+    };
+    // They share the same raw name "same" after stripping suffixes
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props.length).toBe(1);
+    expect(props[0].name).toBe("Same");
+  });
+
+  it("strips markdown from string values", async () => {
+    const block = {
+      properties: {
+        "user.property/note": "This is **bold** and [[Page]]",
+      },
+    };
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+    expect(props[0].value).toBe("This is bold and Page");
   });
 });

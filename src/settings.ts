@@ -44,6 +44,7 @@ export function registerSettings(): void {
         "rtree",
         "fish",
         "tmap",
+        "erd",
       ],
       enumPicker: "select",
       default: DEFAULTS.defaultView,
