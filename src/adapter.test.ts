@@ -334,7 +334,7 @@ describe("extractDisplayProperties", () => {
   const idCache = new Map<number, string | null>();
 
   it("extracts and formats string, number, and boolean properties", async () => {
-    const block = {
+    const block: any = {
       [PROP_DUE]: "2024-05-20",
       properties: {
         [PROP_STATUS]: "active",
@@ -352,7 +352,7 @@ describe("extractDisplayProperties", () => {
   });
 
   it("excludes relates_to and depends_on", async () => {
-    const block = {
+    const block: any = {
       [PROP_REL]: "some-uuid",
       properties: {
         "user.property/depends_on-456": "other-uuid",
@@ -364,7 +364,7 @@ describe("extractDisplayProperties", () => {
   });
 
   it("resolves ref-shaped objects to titles", async () => {
-    const block = {
+    const block: any = {
       properties: {
         "user.property/link": { "block/uuid": UUID_A },
         "user.property/ref_id": { id: 99 },
@@ -378,7 +378,7 @@ describe("extractDisplayProperties", () => {
   });
 
   it("formats arrays by joining formatted elements", async () => {
-    const block = {
+    const block: any = {
       properties: {
         "user.property/list": ["a", 1, true, { uuid: UUID_A }],
       },
@@ -390,7 +390,7 @@ describe("extractDisplayProperties", () => {
   });
 
   it("dedups properties across top-level and .properties", async () => {
-    const block = {
+    const block: any = {
       "user.property/same-1": "top",
       properties: {
         "user.property/same-2": "nested",
@@ -403,7 +403,7 @@ describe("extractDisplayProperties", () => {
   });
 
   it("strips markdown from string values", async () => {
-    const block = {
+    const block: any = {
       properties: {
         "user.property/note": "This is **bold** and [[Page]]",
       },
