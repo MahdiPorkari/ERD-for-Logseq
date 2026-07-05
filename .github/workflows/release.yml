@@ -1,0 +1,51 @@
+name: Create Release
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  list-commits:
+    runs-on: ubuntu-latest
+    outputs:
+      shas: ${{ steps.list.outputs.shas }}
+    steps:
+      - id: list
+        run: echo 'shas=${{ toJSON(github.event.commits.*.id) }}' >> "$GITHUB_OUTPUT"
+
+  release:
+    needs: list-commits
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        sha: ${{ fromJSON(needs.list-commits.outputs.shas) }}
+      fail-fast: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.sha }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm ci
+      - run: npm run build
+
+      - name: Package plugin zip
+        run: |
+          mkdir release-pkg
+          cp -r dist release-pkg/dist
+          cp package.json icon.png README.md LICENSE release-pkg/
+          cd release-pkg
+          zip -r ../logseq-plugin-outline-canvas.zip .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ matrix.sha }}
+          name: "Build ${{ matrix.sha }}"
+          files: logseq-plugin-outline-canvas.zip
