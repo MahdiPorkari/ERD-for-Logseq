@@ -14,6 +14,7 @@ export interface TreeNode {
   depth: number;
   id: number;
   uuid: string;
+  properties?: { name: string; value: string }[];
   refs?: NodeRef[];
 }
 

@@ -32,6 +32,7 @@ const MAX_REF_DEPTH = 3;
  * the property after creation the connector keeps drawing — acceptable v1.
  */
 const REL_KEY_RE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$/;
+const USER_PROP_RE = /^:?user\.property\/(.+)$/;
 
 /**
  * Replace `[[uuid]]` node references inside text with the referenced entity's
@@ -142,6 +143,110 @@ async function extractRefUuids(
  * keys (DB-graph style) and the `.properties` sub-object (legacy / fallback).
  * Dedupes if a key appears in both places.
  */
+/**
+ * Format a property value for display.
+ */
+/**
+ * Format a property value for display.
+ */
+async function formatPropertyValue(
+  value: unknown,
+  idCache: Map<number, string | null>,
+  idResolver: IdResolver,
+  fetcher: RefFetcher
+): Promise<string> {
+  if (value == null) return "";
+  if (Array.isArray(value)) {
+    const formatted = await Promise.all(
+      value.map((v) => formatPropertyValue(v, idCache, idResolver, fetcher))
+    );
+    return formatted.filter(Boolean).join(", ");
+  }
+  if (typeof value === "boolean") return value ? "Yes" : "No";
+  if (typeof value === "number") return String(value);
+  if (typeof value === "string") return stripMarkdown(value);
+
+  // Ref-shaped objects
+  if (typeof value === "object") {
+    const uuids = await extractRefUuids(value, idCache, idResolver);
+    if (uuids.length > 0) {
+      const titles = await Promise.all(
+        uuids.map(async (uuid) => {
+          const resolved = await fetcher(uuid);
+          return resolved || uuid;
+        })
+      );
+      return titles.join(", ");
+    }
+  }
+
+  return String(value);
+}
+
+/**
+ * Convert a raw property name (e.g. "due_date") to title case ("Due Date").
+ */
+function titleCase(name: string): string {
+  return name
+    .replace(/[_-]/g, " ")
+    .split(" ")
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+/**
+ * Extract all user-defined properties from a block, excluding relationship
+ * properties, and format them for display.
+ */
+export async function extractDisplayProperties(
+  block: LogseqBlock,
+  idCache: Map<number, string | null>,
+  idResolver: IdResolver,
+  fetcher: RefFetcher
+): Promise<{ name: string; value: string }[]> {
+  const propsMap = new Map<string, { rawName: string; value: unknown }>();
+
+  const processEntry = (key: string, value: unknown) => {
+    const m = USER_PROP_RE.exec(key);
+    if (!m) return;
+
+    // Strip prefix and random suffix. Suffix is always -[a-zA-Z0-9]+ at the end.
+    let rawName = m[1];
+    if (/-[a-zA-Z0-9]+$/.test(rawName)) {
+      rawName = rawName.replace(/-[a-zA-Z0-9]+$/, "");
+    }
+
+    const normalizedKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+
+    if (normalizedKey === "relates_to" || normalizedKey === "depends_on") return;
+
+    // Dedup by normalizedKey
+    if (!propsMap.has(normalizedKey)) {
+      propsMap.set(normalizedKey, { rawName, value });
+    }
+  };
+
+  // Top-level keys
+  for (const [key, value] of Object.entries(block)) {
+    processEntry(key, value);
+  }
+
+  // Nested properties
+  if (block.properties && typeof block.properties === "object") {
+    for (const [key, value] of Object.entries(block.properties)) {
+      processEntry(key, value);
+    }
+  }
+
+  const out = await Promise.all(
+    Array.from(propsMap.values()).map(async ({ rawName, value }) => ({
+      name: titleCase(rawName),
+      value: await formatPropertyValue(value, idCache, idResolver, fetcher),
+    }))
+  );
+
+  return out.sort((a, b) => a.name.localeCompare(b.name));
+}
 async function extractRefs(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
@@ -234,6 +339,7 @@ async function convertBlock(
     return null;
   }
 
+  const properties = await extractDisplayProperties(block, idCache, idResolver, fetcher);
   const refs = await extractRefs(block, idCache, idResolver);
 
   const children: TreeNode[] = [];
@@ -250,6 +356,7 @@ async function convertBlock(
     depth,
     id: nextId++,
     uuid: block.uuid,
+    properties,
     refs,
   };
 }

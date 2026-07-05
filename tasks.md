@@ -241,6 +241,26 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 - [ ] All 64+ existing tests still pass; new module tests added
 - [ ] Manual smoke: dock toggle, full-screen toggle, macro insertion, click-to-focus, export PNG, copy PNG all work unchanged
 
+### Feature: ERD Property Rows (target v1.3.0)
+**Adapter**
+- [x] `TreeNode.properties?: { name: string; value: string }[]` in `src/types.ts`
+- [x] `extractDisplayProperties(block, idCache, idResolver, fetcher)` in `src/adapter.ts`
+  - [x] Iterates top-level keys + `.properties`, dedups by raw name
+  - [x] Strips prefix/suffix, title-cases names (e.g., `due_date` -> "Due Date")
+  - [x] Formats values (string, number, boolean, array, ref-shaped objects to titles)
+  - [x] Excludes `relates_to` / `depends_on` specifically
+  - [x] Sorts alphabetically by display name
+- [x] Wire into `convertBlock` to populate every TreeNode
+- [x] 5+ tests in `adapter.test.ts` (types, resolution, exclusion, dedup)
+
+**ERD Rendering**
+- [x] `nodeSize()` and `subtreeHeight()` recomputed for variable content height in `src/views/erd.ts`
+- [x] Header (content) + Divider line + Property rows (name: value) layout
+- [x] Multi-line text wrapping for long property values (reuse `wrapText` philosophy)
+- [x] Small font (~10-11px) and `theme().muted` for property rows
+- [x] `src/views/erd.test.ts` verifying box growth with 0 vs N properties
+
+
 ### Feature: Visual Validation
 - [ ] Tree Chart — visual validation with real data
 - [ ] Tree Table — visual validation with real data

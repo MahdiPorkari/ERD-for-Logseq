@@ -1,20 +1,40 @@
 import type { TreeNode, LayoutResult, RenderElement, Rect } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
-import { measureBoxHeight, adaptiveWidth } from "../text";
+import { measureBoxHeight, adaptiveWidth, wrapText, LINE_HEIGHT, TEXT_PAD_Y } from "../text";
 
 const NODE_GAP = 16;
 const COL_GAP = 60;
 const MIN_W = 155;
+const PROP_FONT_SIZE = 10;
+const PROP_PADDING_Y = 4;
+const DIVIDER_MARGIN_Y = 6;
 
-/** Compute box size for any node */
-function nodeSize(n: TreeNode): { w: number; h: number } {
+/** Compute box size for any node, accounting for properties */
+function nodeSize(n: TreeNode): { w: number; h: number; headerH: number; propRows: { text: string; h: number }[] } {
   const isRoot = n.depth === 0;
   const fontSize = isRoot ? 16 : 12;
   const fontWeight = isRoot ? 700 : 600;
   const baseW = isRoot ? 200 : MIN_W;
   const w = adaptiveWidth(n.name, baseW, fontSize, fontWeight);
-  const h = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
-  return { w, h };
+  const headerH = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
+
+  const propRows: { text: string; h: number }[] = [];
+  let totalPropH = 0;
+
+  if (n.properties && n.properties.length > 0) {
+    const maxTextWidth = w - 16; // TEXT_PAD_X * 2
+    for (const prop of n.properties) {
+      const propText = `${prop.name}: ${prop.value}`;
+      const lines = wrapText(propText, maxTextWidth, PROP_FONT_SIZE, 400);
+      const rowH = lines.length * PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y;
+      propRows.push({ text: propText, h: rowH });
+      totalPropH += rowH;
+    }
+  }
+
+  const h = headerH + (propRows.length > 0 ? DIVIDER_MARGIN_Y * 2 + totalPropH : 0);
+
+  return { w, h, headerH, propRows };
 }
 
 /** Recursively compute the total height a subtree needs */
@@ -39,7 +59,7 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
     yStart: number,
     parentColorIndex: number
   ): { cy: number; height: number } {
-    const { w, h } = nodeSize(node);
+    const { w, h, headerH, propRows } = nodeSize(node);
     const totalH = subtreeHeight(node);
     const cy = yStart + totalH / 2;
     const boxY = cy - h / 2;
@@ -61,13 +81,84 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       stroke: isRoot ? theme().rootStroke : (isLeaf ? c.leafStroke : c.stroke),
       lw: isRoot ? 2.5 : (isLeaf ? 0.8 : 1.5),
       rad: isRoot ? 14 : (isLeaf ? 6 : 8),
-      text: node.name,
-      textColor: isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text),
-      textSize: isRoot ? 16 : 12,
-      textWeight: isRoot ? 700 : (isLeaf ? 400 : 600),
-      dash: isLeaf ? c.dash : undefined,
       uuid: node.uuid,
     });
+
+    // Header Text (manually added since we stripped text from box to allow top-align)
+    // Box center text is usually centered. Here we want it in the header area.
+    // Actually, BoxElement in renderer.ts centers text in the box.
+    // Since we want header + properties, we should draw text elements manually.
+
+    // Title
+    const titleLines = wrapText(node.name, w - 16, isRoot ? 16 : 12, isRoot ? 700 : 600);
+    const titleLineH = (isRoot ? 16 : 12) * LINE_HEIGHT;
+    let textY = boxY + TEXT_PAD_Y + titleLineH / 2;
+    for (const line of titleLines) {
+      els.push({
+        type: "text",
+        text: line,
+        x: x + w / 2,
+        y: textY,
+        color: isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text),
+        size: isRoot ? 16 : 12,
+        weight: isRoot ? 700 : 600,
+        align: "center",
+        baseline: "middle",
+      });
+      textY += titleLineH;
+    }
+
+    // Divider & Properties
+    if (propRows.length > 0) {
+      const dividerY = boxY + headerH + DIVIDER_MARGIN_Y;
+      els.push({
+        type: "line",
+        x1: x + 4,
+        y1: dividerY,
+        x2: x + w - 4,
+        y2: dividerY,
+        color: theme().tableBorder || "#ccc",
+        lw: 1,
+      });
+
+      let propY = dividerY + DIVIDER_MARGIN_Y;
+      propRows.forEach((row, i) => {
+        // Alternating background (optional/cosmetic)
+        if (i % 2 === 1 && theme().tableStripe) {
+           els.push({
+             type: "box",
+             x: x + 1,
+             y: propY,
+             w: w - 2,
+             h: row.h,
+             fill: theme().tableStripe,
+             stroke: "transparent",
+             lw: 0,
+             rad: 0
+           });
+        }
+
+        const lines = wrapText(row.text, w - 16, PROP_FONT_SIZE, 400);
+        const rowLineH = PROP_FONT_SIZE * LINE_HEIGHT;
+        let lineY = propY + rowLineH / 2;
+        for (const line of lines) {
+          els.push({
+            type: "text",
+            text: line,
+            x: x + 8,
+            y: lineY,
+            color: theme().muted || "#666",
+            size: PROP_FONT_SIZE,
+            weight: 400,
+            align: "left",
+            baseline: "middle",
+          });
+          lineY += rowLineH;
+        }
+        propY += row.h;
+      });
+    }
+
     if (node.uuid) nodeRectsByUuid.set(node.uuid, { x, y: boxY, w, h });
 
     maxX = Math.max(maxX, x + w);
