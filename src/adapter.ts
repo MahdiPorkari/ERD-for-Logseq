@@ -107,7 +107,7 @@ export async function resolveNodeRefs(
   for (const uuid of uuids) {
     if (resolving.has(uuid)) continue;
 
-    let resolved = cache.get(uuid);
+    let resolved: string | null | undefined = cache.get(uuid);
     if (resolved === undefined) {
       try {
         resolving.add(uuid);
