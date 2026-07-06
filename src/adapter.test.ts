@@ -1,5 +1,5 @@
-import { describe, it, expect, vi } from "vitest";
-import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties } from "./adapter";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties, extractTags } from "./adapter";
 import type { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -410,5 +410,50 @@ describe("extractDisplayProperties", () => {
     };
     const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
     expect(props[0].value).toBe("This is bold and Page");
+  });
+});
+
+describe("extractTags", () => {
+  const noTags = vi.fn(async () => []);
+  let tagCache = new Map<string, string[]>();
+  beforeEach(() => { tagCache = new Map(); });
+
+  it("extracts inline tags with # prefix", async () => {
+    const block: any = { uuid: "u", content: "hello #tag1 and #[[Multi Word Tag]]" };
+    const tags = await extractTags(block, tagCache, noTags);
+    expect(tags).toEqual(["Multi Word Tag", "tag1"]);
+  });
+
+  it("extracts tags from block.properties.tags", async () => {
+    const block: any = { uuid: "u", properties: { tags: ["propTag"] } };
+    const tags = await extractTags(block, tagCache, noTags);
+    expect(tags).toEqual(["propTag"]);
+  });
+
+  it("calls TagResolver for blocks without inline tags", async () => {
+    const resolver = vi.fn(async () => ["dbTag"]);
+    const block: any = { uuid: "u", content: "no inline tags" };
+    const tags = await extractTags(block, tagCache, resolver);
+    expect(tags).toEqual(["dbTag"]);
+    expect(resolver).toHaveBeenCalledWith("u");
+  });
+
+  it("dedups and sorts tags from multiple sources", async () => {
+    const resolver = vi.fn(async () => ["dbTag", "tag1"]);
+    const block: any = {
+      uuid: "u",
+      content: "#tag1 #tag2",
+      properties: { tags: ["propTag", "tag2"] }
+    };
+    const tags = await extractTags(block, tagCache, resolver);
+    expect(tags).toEqual(["dbTag", "propTag", "tag1", "tag2"]);
+  });
+
+  it("caches resolved tags per uuid", async () => {
+    const resolver = vi.fn(async () => ["dbTag"]);
+    const block: any = { uuid: "u", content: "" };
+    await extractTags(block, tagCache, resolver);
+    await extractTags(block, tagCache, resolver);
+    expect(resolver).toHaveBeenCalledTimes(1);
   });
 });

@@ -14,6 +14,8 @@ export interface LogseqBlock {
 
 /** Resolves a UUID to the referenced entity's display title. Return null if unresolvable. */
 export type RefFetcher = (uuid: string) => Promise<string | null>;
+/** Resolves a block UUID to its tags. */
+export type TagResolver = (uuid: string) => Promise<string[]>;
 
 /** Resolves a numeric `:db/id` entity reference to a block UUID. */
 export type IdResolver = (id: number) => Promise<string | null>;
@@ -197,7 +199,71 @@ function titleCase(name: string): string {
 /**
  * Extract all user-defined properties from a block, excluding relationship
  * properties, and format them for display.
+    tags,
  */
+/** Default tag resolver: calls Logseq Datascript query. */
+/** Default tag resolver: calls Logseq Datascript query. */
+const defaultTagResolver: TagResolver = async (uuid) => {
+  try {
+    if (typeof logseq === "undefined" || !logseq.DB) return [];
+    const query = `[:find (pull ?t [:block/title]) :where [?b :block/uuid #uuid "${uuid}"] [?b :block/tags ?t]]`;
+    const results = await logseq.DB.datascriptQuery(query);
+    if (!results || !Array.isArray(results)) return [];
+
+    return results
+      .flat()
+      .map((t: any) => t["block/title"])
+      .filter(Boolean) as string[];
+  } catch (err) {
+    console.error("extractTags: datascript query failed", err);
+    return [];
+  }
+};
+
+/**
+ * Extract tags from a block using inline mentions, properties, and Datascript.
+ */
+export async function extractTags(
+  block: LogseqBlock,
+  tagCache: Map<string, string[]>,
+  tagResolver: TagResolver
+): Promise<string[]> {
+  if (!block.uuid) return [];
+
+  if (tagCache.has(block.uuid)) {
+    return tagCache.get(block.uuid)!;
+  }
+
+  const tags = new Set<string>();
+
+  // 1. Inline tags: #tag and #[[multi word tag]]
+  const text = (block.content || block.title || "");
+  const inlineTags = text.match(/#\[\[(.+?)\]\]|#([a-zA-Z0-9_-]+)/g);
+  if (inlineTags) {
+    inlineTags.forEach(t => {
+      if (t.startsWith("#[[")) {
+        tags.add(t.slice(3, -2));
+      } else {
+        tags.add(t.slice(1));
+      }
+    });
+  }
+
+  // 2. Properties fallback
+  if (block.properties && Array.isArray(block.properties.tags)) {
+    block.properties.tags.forEach((t: unknown) => {
+      if (typeof t === "string") tags.add(t);
+    });
+  }
+
+  // 3. Reliable Datascript pass
+  const resolved = await tagResolver(block.uuid);
+  resolved.forEach(t => tags.add(t));
+
+  const sorted = Array.from(tags).sort((a, b) => a.localeCompare(b));
+  tagCache.set(block.uuid, sorted);
+  return sorted;
+}
 export async function extractDisplayProperties(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
@@ -329,7 +395,9 @@ async function convertBlock(
   fetcher: RefFetcher,
   cache: Map<string, string>,
   idResolver: IdResolver,
-  idCache: Map<number, string | null>
+  idCache: Map<number, string | null>,
+  tagResolver: TagResolver,
+  tagCache: Map<string, string[]>
 ): Promise<TreeNode | null> {
   const rawText = block.content ?? block.title ?? "";
   const resolved = await resolveNodeRefs(rawText, fetcher, cache);
@@ -340,12 +408,13 @@ async function convertBlock(
   }
 
   const properties = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+  const tags = await extractTags(block, tagCache, tagResolver);
   const refs = await extractRefs(block, idCache, idResolver);
 
   const children: TreeNode[] = [];
   if (block.children) {
     for (const child of block.children) {
-      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache);
+      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache, tagResolver, tagCache);
       if (node) children.push(node);
     }
   }
@@ -357,6 +426,7 @@ async function convertBlock(
     id: nextId++,
     uuid: block.uuid,
     properties,
+    tags,
     refs,
   };
 }
@@ -367,15 +437,17 @@ export async function buildTree(
   pageName: string,
   showEmpty: boolean,
   fetcher: RefFetcher = defaultFetcher,
-  idResolver: IdResolver = defaultIdResolver
+  idResolver: IdResolver = defaultIdResolver,
+  tagResolver: TagResolver = defaultTagResolver
 ): Promise<TreeNode> {
   nextId = 0;
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
+  const tagCache = new Map<string, string[]>();
 
   const children: TreeNode[] = [];
   for (const block of blocks) {
-    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache);
+    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache, tagResolver, tagCache);
     if (node) children.push(node);
   }
 
@@ -484,13 +556,16 @@ export async function fetchTree(showEmpty: boolean): Promise<TreeNode | null> {
   const blocks = await logseq.Editor.getPageBlocksTree(pageName);
   if (!blocks || blocks.length === 0) return null;
 
-  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty);
+  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, defaultTagResolver);
 }
 
 /** Fetch a specific block and its children as a tree */
 export async function fetchBlockTree(
   uuid: string,
-  showEmpty: boolean
+  showEmpty: boolean,
+  fetcher: RefFetcher = defaultFetcher,
+  idResolver: IdResolver = defaultIdResolver,
+  tagResolver: TagResolver = defaultTagResolver
 ): Promise<TreeNode | null> {
   const block = await logseq.Editor.getBlock(uuid, { includeChildren: true });
   if (!block) return null;
@@ -498,14 +573,17 @@ export async function fetchBlockTree(
   nextId = 0;
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
+  const tagCache = new Map<string, string[]>();
   const node = await convertBlock(
     block as unknown as LogseqBlock,
     0,
     showEmpty,
-    defaultFetcher,
+    fetcher,
     cache,
-    defaultIdResolver,
-    idCache
+    idResolver,
+    idCache,
+    tagResolver,
+    tagCache
   );
   return node;
 }

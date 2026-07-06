@@ -57,3 +57,31 @@ describe("layoutERD updated layout", () => {
     expect(lines.length).toBe(3);
   });
 });
+
+describe("layoutERD tags", () => {
+  const node = (name: string, tags: string[] = []): TreeNode => ({
+    name,
+    uuid: "u",
+    depth: 0,
+    id: 1,
+    children: [],
+    tags,
+  });
+
+  it("grows height when tags are present", () => {
+    const root0 = node("Header");
+    const h0 = (layoutERD(root0, 5).elements.find(e => e.type === "box") as any).h;
+
+    const root1 = node("Header", ["tag1", "tag2"]);
+    const h1 = (layoutERD(root1, 5).elements.find(e => e.type === "box") as any).h;
+
+    expect(h1).toBeGreaterThan(h0);
+  });
+
+  it("renders tags in all-caps and joined with dot", () => {
+    const root = node("Header", ["a", "b"]);
+    const result = layoutERD(root, 5);
+    const tagText = (result.elements.find(e => e.type === "text" && (e as any).text.includes("·")) as any).text;
+    expect(tagText).toBe("A · B");
+  });
+});

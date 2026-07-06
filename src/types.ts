@@ -15,6 +15,7 @@ export interface TreeNode {
   id: number;
   uuid: string;
   properties?: { name: string; value: string }[];
+  tags?: string[];
   refs?: NodeRef[];
 }
 

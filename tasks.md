@@ -267,6 +267,23 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 - [x] Update `src/views/erd.test.ts` for fixed-height rows and truncation
 
 
+### Feature: ERD Tags (target v1.4.0)
+**Adapter**
+- [x] `TreeNode.tags?: string[]` in `src/types.ts`
+- [x] `extractTags(block, tagCache, tagResolver)` in `src/adapter.ts`
+  - [x] Free pass: regex `#tag` and `#[[tag]]` + `block.properties.tags`
+  - [x] Reliable pass: Datascript query for `:block/tags`
+  - [x] Dedup and sort alphabetically
+- [x] Wire into `convertBlock` with caching
+- [x] Unit tests for `extractTags` in `adapter.test.ts`
+
+**ERD Rendering**
+- [x] Recompute `nodeSize` for optional tag row height in `src/views/erd.ts`
+- [x] Layout centered all-caps tags at the top of the entity box
+- [x] Reuse `truncateWithEllipsis` for tag row
+- [x] Updated `src/views/erd.test.ts` covering tag row growth and rendering
+
+
 ### Feature: Visual Validation
 - [ ] Tree Chart — visual validation with real data
 - [ ] Tree Table — visual validation with real data
