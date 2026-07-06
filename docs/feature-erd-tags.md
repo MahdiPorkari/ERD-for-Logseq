@@ -1,32 +1,40 @@
-# Feature: ERD Tags (target v1.4.0)
+# Feature: ERD Tag Badges (target v1.4.0)
 
-Render block tags as a centered, all-caps row above the title in the ERD view entity box.
+Render block tags as horizontal rows of rounded badge chips above the title in the ERD view entity box.
 
 ## 1. Goal
-In the **ERD view ONLY**, block tags should be visible at the top of the entity box. This helps identify the "type" or "class" of the entity (e.g., #table, #view, #user).
+In the **ERD view ONLY**, block tags should be visible at the top of the entity box as styled badges. This helps identify the classification of entities. Tags must wrap to multiple lines if they exceed the box width.
 
-## 2. Data Layer (Adapter)
-- **TreeNode Expansion**: `TreeNode` interface gains `tags?: string[]`.
-- **Tag Extraction**: `extractTags(block, tagCache, tagResolver)`
-  - **Free Pass**: Regex extraction from content/title (`#word`, `#[[multi word]]`) + `block.properties.tags`.
-  - **Reliable Pass**: `TagResolver` calls `logseq.DB.datascriptQuery` for `[:find (pull ?t [:block/title]) :where [?b :block/uuid #uuid "uuid"] [?b :block/tags ?t]]`.
-  - **Dedup & Sort**: Alphabetical and unique.
-- **Wiring**: Every `TreeNode` gets `tags` populated during `convertBlock`.
+## 2. Data Layer (Tag Provider)
+- **TagInfo Interface**: `{ uuid: string; title: string }`.
+- **Tag Extraction Strategy**:
+  - **Primary**: `logseq.DB.datascriptQuery` fetching tag entities referencing the block.
+  - **Secondary**: Re-use tag data already present in block objects (e.g., `block[":block/tags"]`).
+  - **Compatibility**: Fallback to runtime-specific helpers if available.
+  - **Forbidden**: No hashtag parsing from text, no regex scanning.
+- **Provider Implementation**:
+  - `getTags(blockUuid: string): Promise<readonly TagInfo[]>`
+  - Check cache first.
+  - Query DB only when necessary.
+  - Invalidate cache on page change or DB change.
 
 ## 3. Render Layer (src/views/erd.ts)
-- **Box Growth**: `nodeSize()` recomputed to include a fixed single-line tag row if `tags.length > 0`.
+- **Badge Styling**:
+  - Rounded corners.
+  - Compact spacing.
+  - Small font.
+  - Theme-aware colors.
 - **Layout Logic**:
-  - Tag row is the first element inside the box.
-  - Text is horizontally centered.
-  - Text is all-caps: `tags.map(t => t.toUpperCase()).join(" · ")`.
-  - Font: `theme().muted`, smaller than title.
-  - Truncated with ellipsis if too wide.
+  - Tags appear in a row *above* the entity title.
+  - **Automatic Wrapping**: Measure tags and wrap into multiple lines if needed.
+  - **Box Growth**: `nodeSize()` recomputed to include full height of wrapped tag rows.
+  - Center horizontal alignment for the tag area.
 
 ## 4. Manual Verification
-- [ ] Verify that UI-assigned tags (not in text) are found via Datascript.
-- [ ] Verify that inline tags are found.
+- [ ] Verify that UI-assigned tags are found via Datascript.
+- [ ] Verify wrapping behavior with 5+ tags on a narrow node.
 
 ## 5. Non-Goals
 - No tags in other views.
-- No pill/badge styling.
-- No settings toggle.
+- No hashtag parsing from text.
+- No hard-coded design language (reuse theme tokens).

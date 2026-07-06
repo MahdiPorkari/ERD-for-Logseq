@@ -268,6 +268,13 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 
 
 ### Feature: ERD Tags (target v1.4.0)
+**Refinement (Badge Chips)**
+- [x] `TagInfo` and `TagProvider` interfaces in `src/adapter.ts`
+- [x] Implement `defaultTagProvider` using primary/secondary/fallback order
+- [x] Cache logic for tags in `buildTree` pipeline
+- [x] Multi-line tag wrapping logic in `src/views/erd.ts`
+- [x] Render tags as rounded badge chips using primitive `box` + `text` elements
+- [x] Unit test for tag wrapping and badge layout
 **Adapter**
 - [x] `TreeNode.tags?: string[]` in `src/types.ts`
 - [x] `extractTags(block, tagCache, tagResolver)` in `src/adapter.ts`

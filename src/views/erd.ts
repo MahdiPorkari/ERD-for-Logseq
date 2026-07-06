@@ -1,4 +1,4 @@
-import type { TreeNode, LayoutResult, RenderElement, Rect } from "../types";
+import type { TreeNode, LayoutResult, RenderElement, Rect, TagInfo } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
 import { measureBoxHeight, adaptiveWidth, wrapText, LINE_HEIGHT, TEXT_PAD_Y, TEXT_PAD_X, truncateWithEllipsis } from "../text";
 
@@ -6,18 +6,51 @@ const NODE_GAP = 16;
 const COL_GAP = 60;
 const MIN_W = 155;
 const TAG_FONT_SIZE = 9;
+const TAG_PADDING_X = 6;
+const TAG_MARGIN_X = 4;
+const TAG_MARGIN_Y = 4;
+const TAG_ROW_HEIGHT = 18;
+
 const PROP_FONT_SIZE = 10;
 const PROP_PADDING_Y = 4;
 const DIVIDER_MARGIN_Y = 6;
 const NAME_GAP = 8;
-const TAG_ROW_HEIGHT = 16;
+
+interface TagRow {
+  tags: TagInfo[];
+  width: number;
+}
+
+/** Group tags into rows that fit within maxWidth */
+function wrapTagChips(tags: TagInfo[], maxWidth: number): TagRow[] {
+  const rows: TagRow[] = [];
+  let currentRow: TagRow = { tags: [], width: 0 };
+
+  // Approximate width per char for 9px font
+  const charW = 5.5;
+
+  tags.forEach(tag => {
+    const tagW = tag.title.length * charW + TAG_PADDING_X * 2;
+    if (currentRow.tags.length > 0 && currentRow.width + TAG_MARGIN_X + tagW > maxWidth) {
+      rows.push(currentRow);
+      currentRow = { tags: [], width: 0 };
+    }
+    if (currentRow.tags.length > 0) currentRow.width += TAG_MARGIN_X;
+    currentRow.tags.push(tag);
+    currentRow.width += tagW;
+  });
+
+  if (currentRow.tags.length > 0) rows.push(currentRow);
+  return rows;
+}
 
 /** Compute box size for any node, accounting for properties and tags */
 function nodeSize(n: TreeNode): {
   w: number;
   h: number;
   headerH: number;
-  tagH: number;
+  tagRows: TagRow[];
+  tagAreaH: number;
   propRows: { name: string; value: string; h: number }[]
 } {
   const isRoot = n.depth === 0;
@@ -25,9 +58,11 @@ function nodeSize(n: TreeNode): {
   const fontWeight = isRoot ? 700 : 600;
   const baseW = isRoot ? 200 : MIN_W;
   const w = adaptiveWidth(n.name, baseW, fontSize, fontWeight);
-  const headerH = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
 
-  const tagH = (n.tags && n.tags.length > 0) ? TAG_ROW_HEIGHT : 0;
+  const tagRows = n.tags && n.tags.length > 0 ? wrapTagChips(n.tags, w - TEXT_PAD_X * 2) : [];
+  const tagAreaH = tagRows.length > 0 ? tagRows.length * TAG_ROW_HEIGHT + TAG_MARGIN_Y : 0;
+
+  const headerH = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
 
   const propRows: { name: string; value: string; h: number }[] = [];
   let totalPropH = 0;
@@ -40,9 +75,9 @@ function nodeSize(n: TreeNode): {
     }
   }
 
-  const h = tagH + headerH + (propRows.length > 0 ? (DIVIDER_MARGIN_Y * 2 + totalPropH) : 0);
+  const h = tagAreaH + headerH + (propRows.length > 0 ? (DIVIDER_MARGIN_Y * 2 + totalPropH) : 0);
 
-  return { w, h, headerH, tagH, propRows };
+  return { w, h, headerH, tagRows, tagAreaH, propRows };
 }
 
 /** Recursively compute the total height a subtree needs */
@@ -55,7 +90,7 @@ function subtreeHeight(node: TreeNode): number {
   return Math.max(nodeSize(node).h, childrenH);
 }
 
-/** ERD View: recursive left-to-right layout with property rows and tags */
+/** ERD View: recursive left-to-right layout with property rows and tag badges */
 export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
   const nodeRectsByUuid = new Map<string, Rect>();
@@ -67,12 +102,12 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
     yStart: number,
     parentColorIndex: number
   ): { cy: number; height: number } {
-    const { w, h, headerH, tagH, propRows } = nodeSize(node);
+    const { w, h, headerH, tagRows, tagAreaH, propRows } = nodeSize(node);
     const totalH = subtreeHeight(node);
     const cy = yStart + totalH / 2;
     const boxY = cy - h / 2;
     const isRoot = node.depth === 0;
-    const colorIdx = node.depth === 0 ? 0 : (node.depth === 1 ? parentColorIndex : parentColorIndex);
+    const colorIdx = node.depth === 0 ? 0 : parentColorIndex;
     const c = branchColor(colorIdx);
     const isLeaf = node.children.length === 0;
 
@@ -92,25 +127,44 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       uuid: node.uuid,
     });
 
-    let currentY = boxY;
+    let currentY = boxY + TAG_MARGIN_Y;
 
-    // Tags (centered all-caps at the very top)
-    if (node.tags && node.tags.length > 0) {
-      const tagText = node.tags.map(t => t.toUpperCase()).join(" · ");
-      const truncatedTags = truncateWithEllipsis(tagText, w - TEXT_PAD_X * 2, TAG_FONT_SIZE, 400);
-      els.push({
-        type: "text",
-        text: truncatedTags,
-        x: x + w / 2,
-        y: currentY + tagH / 2 + 2,
-        color: theme().muted || "#666",
-        size: TAG_FONT_SIZE,
-        weight: 400,
-        align: "center",
-        baseline: "middle",
+    // Tags as rounded badge chips
+    tagRows.forEach(row => {
+      let tagX = x + (w - row.width) / 2;
+      row.tags.forEach(tag => {
+        const tagW = tag.title.length * 5.5 + TAG_PADDING_X * 2;
+
+        els.push({
+          type: "box",
+          x: tagX,
+          y: currentY,
+          w: tagW,
+          h: TAG_ROW_HEIGHT - TAG_MARGIN_Y,
+          fill: theme().accentDim,
+          stroke: theme().accent,
+          lw: 0.5,
+          rad: 4
+        });
+
+        els.push({
+          type: "text",
+          text: tag.title.toUpperCase(),
+          x: tagX + tagW / 2,
+          y: currentY + (TAG_ROW_HEIGHT - TAG_MARGIN_Y) / 2,
+          color: theme().accentText,
+          size: TAG_FONT_SIZE,
+          weight: 600,
+          align: "center",
+          baseline: "middle"
+        });
+
+        tagX += tagW + TAG_MARGIN_X;
       });
-      currentY += tagH;
-    }
+      currentY += TAG_ROW_HEIGHT;
+    });
+
+    if (tagRows.length === 0) currentY = boxY;
 
     // Header Title
     const titleLines = wrapText(node.name, w - TEXT_PAD_X * 2, isRoot ? 16 : 12, isRoot ? 700 : 600);
@@ -132,95 +186,56 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       });
       textY += titleLineH;
     }
-    currentY += headerH;
 
     // Properties
     if (propRows.length > 0) {
-      // Header divider
-      const headerDividerY = currentY + DIVIDER_MARGIN_Y;
+      const headerDividerY = currentY + headerH + DIVIDER_MARGIN_Y;
       els.push({
         type: "line",
-        x1: x + 4,
-        y1: headerDividerY,
-        x2: x + w - 4,
-        y2: headerDividerY,
-        color: theme().tableBorder || "#ccc",
-        lw: 1,
+        x1: x + 4, y1: headerDividerY, x2: x + w - 4, y2: headerDividerY,
+        color: theme().tableBorder || "#ccc", lw: 1,
       });
 
       let propY = headerDividerY + DIVIDER_MARGIN_Y;
-
       propRows.forEach((row, i) => {
         const rowTop = propY;
         const rowBottom = propY + row.h;
         const centerY = rowTop + row.h / 2;
 
-        // Alternating background
         if (i % 2 === 1 && theme().tableStripe) {
            els.push({
-             type: "box",
-             x: x + 1,
-             y: rowTop,
-             w: w - 2,
-             h: row.h,
-             fill: theme().tableStripe,
-             stroke: "transparent",
-             lw: 0,
-             rad: 0
+             type: "box", x: x + 1, y: rowTop, w: w - 2, h: row.h,
+             fill: theme().tableStripe, stroke: "transparent", lw: 0, rad: 0
            });
         }
 
-        // Name (left-aligned, bold)
-        const nameText = `${row.name}:`;
         els.push({
-          type: "text",
-          text: nameText,
-          x: x + TEXT_PAD_X,
-          y: centerY,
-          color: headerTextColor,
-          size: PROP_FONT_SIZE,
-          weight: 700,
-          align: "left",
-          baseline: "middle",
+          type: "text", text: `${row.name}:`, x: x + TEXT_PAD_X, y: centerY,
+          color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
+          align: "left", baseline: "middle",
         });
 
-        // Value (right-aligned, muted, truncated)
         const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
         const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
         const truncatedValue = truncateWithEllipsis(row.value, valueSpace, PROP_FONT_SIZE, 400);
 
         els.push({
-          type: "text",
-          text: truncatedValue,
-          x: x + w - TEXT_PAD_X,
-          y: centerY,
-          color: theme().muted || "#666",
-          size: PROP_FONT_SIZE,
-          weight: 400,
-          align: "right",
-          baseline: "middle",
+          type: "text", text: truncatedValue, x: x + w - TEXT_PAD_X, y: centerY,
+          color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
+          align: "right", baseline: "middle",
         });
 
-        // Divider after every property row
         els.push({
-          type: "line",
-          x1: x + 4,
-          y1: rowBottom,
-          x2: x + w - 4,
-          y2: rowBottom,
-          color: theme().tableBorder || "#ccc",
-          lw: 1,
+          type: "line", x1: x + 4, y1: rowBottom, x2: x + w - 4, y2: rowBottom,
+          color: theme().tableBorder || "#ccc", lw: 1,
         });
-
         propY = rowBottom;
       });
     }
 
     if (node.uuid) nodeRectsByUuid.set(node.uuid, { x, y: boxY, w, h });
-
     maxX = Math.max(maxX, x + w);
 
-    // Recurse into children
     if (node.children.length) {
       const childX = x + w + COL_GAP;
       let childY = yStart;
@@ -231,28 +246,22 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       node.children.forEach((child, ci) => {
         const childColorIdx = node.depth === 0 ? ci : parentColorIndex;
         const childResult = layoutNode(child, childX, childY, childColorIdx);
-
         const sx = x + w, sy = cy;
         const ex = childX, ey = childResult.cy;
         const cpx = (sx + ex) / 2;
-        const curveColor = isRoot
-          ? branchColor(ci).stroke + "80"
-          : c.stroke + "40";
+        const curveColor = isRoot ? branchColor(ci).stroke + "80" : c.stroke + "40";
         els.push({
           type: "curve", x1: sx, y1: sy, cx1: cpx, cy1: sy, cx2: cpx, cy2: ey, x2: ex, y2: ey,
           color: curveColor, lw: isRoot ? 2.2 : 1.3,
         });
-
         childY += childResult.height + NODE_GAP;
       });
     }
-
     return { cy, height: totalH };
   }
 
   const result = layoutNode(root, 40, 40, 0);
   const totalH = result.height;
-
   return {
     elements: els,
     bounds: { x: 0, y: 0, w: maxX + 40, h: totalH + 80 },
