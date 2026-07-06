@@ -259,6 +259,12 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 - [x] Multi-line text wrapping for long property values (reuse `wrapText` philosophy)
 - [x] Small font (~10-11px) and `theme().muted` for property rows
 - [x] `src/views/erd.test.ts` verifying box growth with 0 vs N properties
+- [x] `truncateWithEllipsis(text, maxWidth, fontSize, fontWeight, measure?)` in `src/text.ts`
+- [x] Unit tests for `truncateWithEllipsis` in `src/text.test.ts`
+- [x] Refactor `src/views/erd.ts` for side-by-side Name/Value layout
+- [x] Truncate property values with ellipsis in ERD view
+- [x] Divider line between EVERY property row
+- [x] Update `src/views/erd.test.ts` for fixed-height rows and truncation
 
 
 ### Feature: Visual Validation

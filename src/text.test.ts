@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { wrapText, adaptiveWidth, measureBoxHeight } from "./text";
+import { wrapText, adaptiveWidth, measureBoxHeight, truncateWithEllipsis } from "./text";
 
 // Deterministic measurer: 8px per character (vitest runs in node — no canvas).
 const CHAR_PX = 8;
@@ -100,5 +100,26 @@ describe("measureBoxHeight", () => {
     const url = "https://example.com/" + "segment/".repeat(40);
     const h = measureBoxHeight(url, 720, 12, 400, 28, fakeMeasure);
     expect(h).toBeGreaterThan(60);
+  });
+});
+
+describe("truncateWithEllipsis", () => {
+  it("leaves short text alone", () => {
+    const s = "short";
+    expect(truncateWithEllipsis(s, 100, 12, 400, fakeMeasure)).toBe(s);
+  });
+
+  it("truncates long text and adds an ellipsis", () => {
+    // 10 chars * 8px = 80px. maxWidth 50px.
+    const s = "0123456789";
+    const res = truncateWithEllipsis(s, 50, 12, 400, fakeMeasure);
+    expect(res).toMatch(/…$/);
+    expect(fakeMeasure(res)).toBeLessThanOrEqual(50);
+  });
+
+  it("returns empty string when maxWidth is too small even for ellipsis", () => {
+    const s = "some text";
+    // Ellipsis is 1 char * 8px = 8px. maxWidth 5px.
+    expect(truncateWithEllipsis(s, 5, 12, 400, fakeMeasure)).toBe("");
   });
 });

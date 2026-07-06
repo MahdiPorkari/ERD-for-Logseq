@@ -1,6 +1,6 @@
 import type { TreeNode, LayoutResult, RenderElement, Rect } from "../types";
 import { branchColor, ROOT_TEXT, LEAF_TEXT, theme } from "../colors";
-import { measureBoxHeight, adaptiveWidth, wrapText, LINE_HEIGHT, TEXT_PAD_Y } from "../text";
+import { measureBoxHeight, adaptiveWidth, wrapText, LINE_HEIGHT, TEXT_PAD_Y, TEXT_PAD_X, truncateWithEllipsis } from "../text";
 
 const NODE_GAP = 16;
 const COL_GAP = 60;
@@ -8,9 +8,10 @@ const MIN_W = 155;
 const PROP_FONT_SIZE = 10;
 const PROP_PADDING_Y = 4;
 const DIVIDER_MARGIN_Y = 6;
+const NAME_GAP = 8;
 
 /** Compute box size for any node, accounting for properties */
-function nodeSize(n: TreeNode): { w: number; h: number; headerH: number; propRows: { text: string; h: number }[] } {
+function nodeSize(n: TreeNode): { w: number; h: number; headerH: number; propRows: { name: string; value: string; h: number }[] } {
   const isRoot = n.depth === 0;
   const fontSize = isRoot ? 16 : 12;
   const fontWeight = isRoot ? 700 : 600;
@@ -18,21 +19,18 @@ function nodeSize(n: TreeNode): { w: number; h: number; headerH: number; propRow
   const w = adaptiveWidth(n.name, baseW, fontSize, fontWeight);
   const headerH = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
 
-  const propRows: { text: string; h: number }[] = [];
+  const propRows: { name: string; value: string; h: number }[] = [];
   let totalPropH = 0;
 
   if (n.properties && n.properties.length > 0) {
-    const maxTextWidth = w - 16; // TEXT_PAD_X * 2
+    const rowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
     for (const prop of n.properties) {
-      const propText = `${prop.name}: ${prop.value}`;
-      const lines = wrapText(propText, maxTextWidth, PROP_FONT_SIZE, 400);
-      const rowH = lines.length * PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y;
-      propRows.push({ text: propText, h: rowH });
+      propRows.push({ name: prop.name, value: prop.value, h: rowH });
       totalPropH += rowH;
     }
   }
 
-  const h = headerH + (propRows.length > 0 ? DIVIDER_MARGIN_Y * 2 + totalPropH : 0);
+  const h = headerH + (propRows.length > 0 ? (DIVIDER_MARGIN_Y * 2 + totalPropH) : 0);
 
   return { w, h, headerH, propRows };
 }
@@ -47,7 +45,7 @@ function subtreeHeight(node: TreeNode): number {
   return Math.max(nodeSize(node).h, childrenH);
 }
 
-/** Right Tree: recursive left-to-right layout for arbitrary depth */
+/** ERD View: recursive left-to-right layout with property rows */
 export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
   const els: RenderElement[] = [];
   const nodeRectsByUuid = new Map<string, Rect>();
@@ -84,22 +82,19 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       uuid: node.uuid,
     });
 
-    // Header Text (manually added since we stripped text from box to allow top-align)
-    // Box center text is usually centered. Here we want it in the header area.
-    // Actually, BoxElement in renderer.ts centers text in the box.
-    // Since we want header + properties, we should draw text elements manually.
-
-    // Title
-    const titleLines = wrapText(node.name, w - 16, isRoot ? 16 : 12, isRoot ? 700 : 600);
+    // Header Title
+    const titleLines = wrapText(node.name, w - TEXT_PAD_X * 2, isRoot ? 16 : 12, isRoot ? 700 : 600);
     const titleLineH = (isRoot ? 16 : 12) * LINE_HEIGHT;
     let textY = boxY + TEXT_PAD_Y + titleLineH / 2;
+    const headerTextColor = isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text);
+
     for (const line of titleLines) {
       els.push({
         type: "text",
         text: line,
         x: x + w / 2,
         y: textY,
-        color: isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text),
+        color: headerTextColor,
         size: isRoot ? 16 : 12,
         weight: isRoot ? 700 : 600,
         align: "center",
@@ -108,27 +103,33 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       textY += titleLineH;
     }
 
-    // Divider & Properties
+    // Properties
     if (propRows.length > 0) {
-      const dividerY = boxY + headerH + DIVIDER_MARGIN_Y;
+      // Header divider
+      const headerDividerY = boxY + headerH + DIVIDER_MARGIN_Y;
       els.push({
         type: "line",
         x1: x + 4,
-        y1: dividerY,
+        y1: headerDividerY,
         x2: x + w - 4,
-        y2: dividerY,
+        y2: headerDividerY,
         color: theme().tableBorder || "#ccc",
         lw: 1,
       });
 
-      let propY = dividerY + DIVIDER_MARGIN_Y;
+      let currentY = headerDividerY + DIVIDER_MARGIN_Y;
+
       propRows.forEach((row, i) => {
-        // Alternating background (optional/cosmetic)
+        const rowTop = currentY;
+        const rowBottom = currentY + row.h;
+        const centerY = rowTop + row.h / 2;
+
+        // Alternating background
         if (i % 2 === 1 && theme().tableStripe) {
            els.push({
              type: "box",
              x: x + 1,
-             y: propY,
+             y: rowTop,
              w: w - 2,
              h: row.h,
              fill: theme().tableStripe,
@@ -138,24 +139,50 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
            });
         }
 
-        const lines = wrapText(row.text, w - 16, PROP_FONT_SIZE, 400);
-        const rowLineH = PROP_FONT_SIZE * LINE_HEIGHT;
-        let lineY = propY + rowLineH / 2;
-        for (const line of lines) {
-          els.push({
-            type: "text",
-            text: line,
-            x: x + 8,
-            y: lineY,
-            color: theme().muted || "#666",
-            size: PROP_FONT_SIZE,
-            weight: 400,
-            align: "left",
-            baseline: "middle",
-          });
-          lineY += rowLineH;
-        }
-        propY += row.h;
+        // Name (left-aligned, bold)
+        const nameText = `${row.name}:`;
+        els.push({
+          type: "text",
+          text: nameText,
+          x: x + TEXT_PAD_X,
+          y: centerY,
+          color: headerTextColor,
+          size: PROP_FONT_SIZE,
+          weight: 700,
+          align: "left",
+          baseline: "middle",
+        });
+
+        // Value (right-aligned, muted, truncated)
+        // Hard-cap name column at 40% of width
+        const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
+        const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+        const truncatedValue = truncateWithEllipsis(row.value, valueSpace, PROP_FONT_SIZE, 400);
+
+        els.push({
+          type: "text",
+          text: truncatedValue,
+          x: x + w - TEXT_PAD_X,
+          y: centerY,
+          color: theme().muted || "#666",
+          size: PROP_FONT_SIZE,
+          weight: 400,
+          align: "right",
+          baseline: "middle",
+        });
+
+        // Divider after every property row
+        els.push({
+          type: "line",
+          x1: x + 4,
+          y1: rowBottom,
+          x2: x + w - 4,
+          y2: rowBottom,
+          color: theme().tableBorder || "#ccc",
+          lw: 1,
+        });
+
+        currentY = rowBottom;
       });
     }
 
@@ -169,7 +196,6 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       let childY = yStart;
       const childrenTotalH = node.children.reduce((s, c2) => s + subtreeHeight(c2), 0)
         + (node.children.length - 1) * NODE_GAP;
-      // Center children block within this node's total height
       childY = yStart + (totalH - childrenTotalH) / 2;
 
       node.children.forEach((child, ci) => {

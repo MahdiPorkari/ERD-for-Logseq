@@ -213,3 +213,39 @@ export function measureBoxHeight(
 
   return Math.max(totalH, minHeight);
 }
+
+/**
+ * Truncate text with an ellipsis if it exceeds maxWidth.
+ */
+export function truncateWithEllipsis(
+  text: string,
+  maxWidth: number,
+  fontSize: number,
+  fontWeight: number = 400,
+  measure: MeasureFn = canvasMeasure
+): string {
+  if (measure(text, fontSize, fontWeight) <= maxWidth) return text;
+
+  const ellipsis = "…";
+  const ellipsisWidth = measure(ellipsis, fontSize, fontWeight);
+
+  if (ellipsisWidth >= maxWidth) return "";
+
+  // Greedy approach: trim characters until it fits with the ellipsis
+  let low = 0;
+  let high = text.length;
+  let best = "";
+
+  while (low <= high) {
+    const mid = Math.floor((low + high) / 2);
+    const candidate = text.slice(0, mid) + ellipsis;
+    if (measure(candidate, fontSize, fontWeight) <= maxWidth) {
+      best = candidate;
+      low = mid + 1;
+    } else {
+      high = mid - 1;
+    }
+  }
+
+  return best;
+}
