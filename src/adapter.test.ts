@@ -1,7 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties, DefaultTagProvider, TagProvider } from "./adapter";
-import type { TreeNode, TagInfo } from "./types";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties } from "./adapter";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
@@ -27,42 +26,177 @@ describe("resolveNodeRefs", () => {
 });
 
 describe("DefaultTagProvider", () => {
-  it("extracts tags from block object keys", async () => {
-    const block = {
-      uuid: "u1",
-      ":block/tags": [{ uuid: "t1", title: "Tag1" }],
-      "user.property/tags": { uuid: "t2", title: "Tag2" }
+  beforeEach(() => {
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([])
+      },
+      Editor: {
+        getBlock: vi.fn().mockResolvedValue(null)
+      }
+    });
+  });
+
+  it("extracts tags from authoritative Tier 1 query", async () => {
+    const tagUuid = "tag-uuid";
+    const tagTitle = "AuthoritativeTag";
+    (logseq.DB.datascriptQuery as any).mockResolvedValueOnce([
+      [{ ":block/uuid": tagUuid, ":block/title": tagTitle }]
+    ]);
+
+    const provider = new DefaultTagProvider();
+    const tags = await provider.getTags("b1");
+
+    expect(tags).toHaveLength(1);
+    expect(tags[0].title).toBe(tagTitle);
+    expect(tags[0].uuid).toBe(tagUuid);
+    expect(logseq.DB.datascriptQuery).toHaveBeenCalledWith(expect.any(String), '#uuid "b1"');
+  });
+
+  it("falls back to Tier 2 regex parsing of content", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      content: "Hello #world and #[[Multi Word]] and [[Direct Link]]"
     };
-    const provider = new DefaultTagProvider(new Map([["u1", block as any]]));
-    const tags = await provider.getTags("u1");
-    expect(tags).toHaveLength(2);
-    expect(tags[0].title).toBe("Tag1");
-    expect(tags[1].title).toBe("Tag2");
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+
+    // world, Multi Word, Direct Link
+    expect(tags).toHaveLength(3);
+    const titles = tags.map(t => t.title);
+    expect(titles).toContain("world");
+    expect(titles).toContain("Multi Word");
+    expect(titles).toContain("Direct Link");
+  });
+
+  it("falls back to Tier 3 properties and dedupes correctly", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      content: "#tag1",
+      properties: {
+        tags: "tag1, tag2, #tag3, [[tag4]]"
+      }
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+
+    expect(tags).toHaveLength(4);
+    const titles = tags.map(t => t.title);
+    expect(titles).toContain("tag1");
+    expect(titles).toContain("tag2");
+    expect(titles).toContain("tag3");
+    expect(titles).toContain("tag4");
+  });
+
+  it("merges all tiers and sorts results", async () => {
+    (logseq.DB.datascriptQuery as any).mockResolvedValueOnce([
+      [{ ":block/title": "Zebra" }]
+    ]);
+    const block: LogseqBlock = {
+      uuid: "b1",
+      content: "#Apple",
+      properties: {
+        tags: "Banana"
+      }
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+
+    expect(tags).toHaveLength(3);
+    expect(tags[0].title).toBe("Apple");
+    expect(tags[1].title).toBe("Banana");
+    expect(tags[2].title).toBe("Zebra");
   });
 });
 
 describe("buildTree with tags", () => {
   it("populates tags on TreeNode via provider", async () => {
-    const blocks: any[] = [{
-      uuid: "b1",
-      content: "Block",
-      ":block/tags": [{ uuid: "t1", title: "Tag1" }]
-    }];
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockImplementation((query, uuid) => {
+           if (uuid === '#uuid "b1"') return Promise.resolve([[{ ":block/uuid": "t1", ":block/title": "Tag1" }]]);
+           if (uuid === '#uuid "b2"') return Promise.resolve([[{ ":block/uuid": "t2", ":block/title": "Tag2" }]]);
+           return Promise.resolve([]);
+        })
+      },
+      Editor: {
+        getBlock: vi.fn().mockResolvedValue(null)
+      }
+    });
+    const blocks: LogseqBlock[] = [
+      {
+        uuid: "b1",
+        content: "Block 1"
+      },
+      {
+        uuid: "b2",
+        content: "Block 2"
+      }
+    ];
     const tree = await buildTree(blocks, "Page", false);
-    expect(tree.tags).toHaveLength(1);
-    expect(tree.tags![0].title).toBe("Tag1");
+    // Page node with two children
+    expect(tree.children).toHaveLength(2);
+    expect(tree.children[0].tags).toHaveLength(1);
+    expect(tree.children[0].tags![0].title).toBe("Tag1");
+    expect(tree.children[1].tags).toHaveLength(1);
+    expect(tree.children[1].tags![0].title).toBe("Tag2");
   });
 });
 
-describe("DefaultTagProvider improvements", () => {
-  it("extracts tags even if they are strings", async () => {
-    const block = {
-      uuid: "u1",
-      "user.property/tags-abc": "#Tag1"
+describe("extractDisplayProperties", () => {
+  it("excludes 'tags', 'relates_to', and 'depends_on'", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      "user.property/tags": "t1",
+      "user.property/relates_to": "r1",
+      "user.property/depends_on": "d1",
+      "user.property/custom": "value"
     };
-    const provider = new DefaultTagProvider(new Map([["u1", block as any]]));
-    const tags = await provider.getTags("u1");
+    const fetcher = vi.fn();
+    const idResolver = vi.fn();
+    const idCache = new Map();
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+
+    expect(props).toHaveLength(1);
+    expect(props[0].name).toBe("Custom");
+    expect(props[0].value).toBe("value");
+  });
+});
+
+describe("DefaultTagProvider edge cases", () => {
+  it("handles non-plugin environment gracefully", async () => {
+    vi.stubGlobal("logseq", undefined);
+    const block: LogseqBlock = {
+      uuid: "b1",
+      content: "#tag1"
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
     expect(tags).toHaveLength(1);
-    expect(tags[0].title).toBe("#Tag1");
+    expect(tags[0].title).toBe("tag1");
+  });
+
+  it("handles complex property values", async () => {
+    vi.stubGlobal("logseq", {
+       DB: { datascriptQuery: vi.fn().mockResolvedValue([]) },
+       Editor: { getBlock: vi.fn().mockResolvedValue(null) }
+    });
+    const block: LogseqBlock = {
+      uuid: "b1",
+      properties: {
+        tags: [
+          { uuid: "t1", title: "ObjectTag" },
+          "StringTag",
+          "#PrefixedTag"
+        ]
+      }
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+    expect(tags).toHaveLength(3);
+    const titles = tags.map(t => t.title);
+    expect(titles).toContain("ObjectTag");
+    expect(titles).toContain("StringTag");
+    expect(titles).toContain("PrefixedTag");
   });
 });
