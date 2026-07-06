@@ -7,6 +7,12 @@ export interface NodeRef {
   targetUuid: string;
 }
 
+/** Data for a single tag entity */
+export interface TagInfo {
+  uuid: string;
+  title: string;
+}
+
 /** Internal tree node converted from Logseq BlockEntity */
 export interface TreeNode {
   name: string;
@@ -15,6 +21,7 @@ export interface TreeNode {
   id: number;
   uuid: string;
   properties?: { name: string; value: string }[];
+  tags?: TagInfo[];
   refs?: NodeRef[];
 }
 

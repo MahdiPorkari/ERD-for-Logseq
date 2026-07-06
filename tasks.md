@@ -259,6 +259,36 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 - [x] Multi-line text wrapping for long property values (reuse `wrapText` philosophy)
 - [x] Small font (~10-11px) and `theme().muted` for property rows
 - [x] `src/views/erd.test.ts` verifying box growth with 0 vs N properties
+- [x] `truncateWithEllipsis(text, maxWidth, fontSize, fontWeight, measure?)` in `src/text.ts`
+- [x] Unit tests for `truncateWithEllipsis` in `src/text.test.ts`
+- [x] Refactor `src/views/erd.ts` for side-by-side Name/Value layout
+- [x] Truncate property values with ellipsis in ERD view
+- [x] Divider line between EVERY property row
+- [x] Update `src/views/erd.test.ts` for fixed-height rows and truncation
+
+
+### Feature: ERD Tags (target v1.4.0)
+**Refinement (Badge Chips)**
+- [x] `TagInfo` and `TagProvider` interfaces in `src/adapter.ts`
+- [x] Implement `defaultTagProvider` using primary/secondary/fallback order
+- [x] Cache logic for tags in `buildTree` pipeline
+- [x] Multi-line tag wrapping logic in `src/views/erd.ts`
+- [x] Render tags as rounded badge chips using primitive `box` + `text` elements
+- [x] Unit test for tag wrapping and badge layout
+**Adapter**
+- [x] `TreeNode.tags?: string[]` in `src/types.ts`
+- [x] `extractTags(block, tagCache, tagResolver)` in `src/adapter.ts`
+  - [x] Free pass: regex `#tag` and `#[[tag]]` + `block.properties.tags`
+  - [x] Reliable pass: Datascript query for `:block/tags`
+  - [x] Dedup and sort alphabetically
+- [x] Wire into `convertBlock` with caching
+- [x] Unit tests for `extractTags` in `adapter.test.ts`
+
+**ERD Rendering**
+- [x] Recompute `nodeSize` for optional tag row height in `src/views/erd.ts`
+- [x] Layout centered all-caps tags at the top of the entity box
+- [x] Reuse `truncateWithEllipsis` for tag row
+- [x] Updated `src/views/erd.test.ts` covering tag row growth and rendering
 
 
 ### Feature: Visual Validation
