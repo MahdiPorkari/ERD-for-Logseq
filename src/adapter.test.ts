@@ -1,7 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties, DefaultTagProvider } from "./adapter";
-import type { TreeNode, TagProvider, TagInfo } from "./types";
+import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties, DefaultTagProvider, TagProvider } from "./adapter";
+import type { TreeNode, TagInfo } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
