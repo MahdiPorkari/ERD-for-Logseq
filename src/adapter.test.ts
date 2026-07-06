@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { resolveNodeRefs, buildTree, filterIntraTreeRefs, flattenDeep, extractDisplayProperties, extractTags } from "./adapter";
 import type { TreeNode } from "./types";
@@ -8,41 +9,35 @@ const UUID_BUG = "69fd1b8a-9fda-4a4b-982b-836e19aeb5e6"; // from the reported bu
 
 describe("resolveNodeRefs", () => {
   it("returns text unchanged and never calls the fetcher when there are no refs", async () => {
-    const fetcher = vi.fn(async () => null);
-    const result = await resolveNodeRefs("just plain text", fetcher);
-    expect(result).toBe("just plain text");
+    const fetcher = vi.fn();
+    const result = await resolveNodeRefs("no refs here", fetcher);
+    expect(result).toBe("no refs here");
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("leaves non-UUID page-name refs alone (only UUID-form refs are resolved)", async () => {
-    const fetcher = vi.fn(async () => null);
-    const result = await resolveNodeRefs("see [[Some Page]]", fetcher);
-    expect(result).toBe("see [[Some Page]]");
+    const fetcher = vi.fn();
+    const result = await resolveNodeRefs("[[Some Page]]", fetcher);
+    expect(result).toBe("[[Some Page]]");
     expect(fetcher).not.toHaveBeenCalled();
   });
 
   it("resolves a single UUID ref to the referenced title (the reported bug)", async () => {
-    const fetcher = vi.fn(async (id: string) =>
-      id === UUID_BUG ? "tasky-reference child" : null
-    );
+    const fetcher = vi.fn(async () => "Referenced Title");
     const result = await resolveNodeRefs(`[[${UUID_BUG}]]`, fetcher);
-    expect(result).toBe("tasky-reference child");
+    expect(result).toBe("Referenced Title");
+    expect(fetcher).toHaveBeenCalledWith(UUID_BUG);
   });
 
   it("resolves multiple UUID refs interleaved with other text", async () => {
-    const fetcher = vi.fn(async (id: string) =>
-      id === UUID_A ? "Alpha" : id === UUID_B ? "Beta" : null
-    );
-    const result = await resolveNodeRefs(
-      `before [[${UUID_A}]] middle [[${UUID_B}]] after`,
-      fetcher
-    );
-    expect(result).toBe("before Alpha middle Beta after");
+    const fetcher = vi.fn(async (id: string) => (id === UUID_A ? "Alpha" : "Beta"));
+    const result = await resolveNodeRefs(`start [[${UUID_A}]] mid [[${UUID_B}]] end`, fetcher);
+    expect(result).toBe("start Alpha mid Beta end");
   });
 
   it("dedupes lookups: same UUID appearing twice triggers fetcher once", async () => {
     const fetcher = vi.fn(async () => "Title");
-    await resolveNodeRefs(`[[${UUID_A}]] and again [[${UUID_A}]]`, fetcher);
+    await resolveNodeRefs(`[[${UUID_A}]] and [[${UUID_A}]]`, fetcher);
     expect(fetcher).toHaveBeenCalledTimes(1);
   });
 
@@ -86,7 +81,7 @@ describe("buildTree (end-to-end ref resolution)", () => {
     const fetcher = vi.fn(async (id: string) =>
       id === UUID_BUG ? "Referenced Block Title" : null
     );
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "block-1",
         title: `[[${UUID_BUG}]]`,
@@ -102,7 +97,7 @@ describe("buildTree (end-to-end ref resolution)", () => {
     const fetcher = vi.fn(async (id: string) =>
       id === UUID_A ? "Child Title" : null
     );
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "parent",
         title: "Parent",
@@ -130,7 +125,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
 
   it("extracts a single :cardinality/one ref via {block/uuid} value shape, from .properties", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "p",
         title: "Parent",
@@ -150,7 +145,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
 
   it("extracts refs from top-level namespaced keys (DB-graph style)", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks: unknown[] = [
+    const blocks: any[] = [
       {
         uuid: "c",
         title: "Block",
@@ -159,13 +154,13 @@ describe("buildTree with relates_to / depends_on properties", () => {
         children: [],
       },
     ];
-    const tree = await buildTree(blocks as never, "Page", false, fetcher, noResolve);
+    const tree = await buildTree(blocks, "Page", false, fetcher, noResolve);
     expect(tree.refs).toEqual([{ kind: "depends_on", targetUuid: TGT_A }]);
   });
 
   it("tolerates leading-colon keys (:user.property/...)", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks: unknown[] = [
+    const blocks: any[] = [
       {
         uuid: "c",
         title: "Block",
@@ -173,13 +168,13 @@ describe("buildTree with relates_to / depends_on properties", () => {
         children: [],
       },
     ];
-    const tree = await buildTree(blocks as never, "Page", false, fetcher, noResolve);
+    const tree = await buildTree(blocks, "Page", false, fetcher, noResolve);
     expect(tree.refs).toEqual([{ kind: "relates_to", targetUuid: TGT_A }]);
   });
 
   it("extracts multiple targets from :cardinality/many (array value)", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "c",
         title: "Block",
@@ -196,7 +191,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
 
   it("accepts bare UUID string values", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks = [
+    const blocks: any[] = [
       { uuid: "c", title: "Block", properties: { [PROP_DEPENDS]: TGT_A }, children: [] },
     ];
     const tree = await buildTree(blocks, "Page", false, fetcher, noResolve);
@@ -206,7 +201,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
   it("resolves :db/id-shaped ref values via the idResolver", async () => {
     const fetcher = vi.fn(async () => null);
     const idResolver = vi.fn(async (id: number) => (id === 99 ? TGT_A : null));
-    const blocks = [
+    const blocks: any[] = [
       { uuid: "c", title: "Block", properties: { [PROP_DEPENDS]: { id: 99 } }, children: [] },
     ];
     const tree = await buildTree(blocks, "Page", false, fetcher, idResolver);
@@ -216,7 +211,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
   it("caches id-resolver lookups (one call per unique numeric id)", async () => {
     const fetcher = vi.fn(async () => null);
     const idResolver = vi.fn(async (id: number) => (id === 99 ? TGT_A : null));
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "p",
         title: "Parent",
@@ -232,7 +227,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
 
   it("ignores user-properties whose ident is not relates_to / depends_on", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks = [
+    const blocks: any[] = [
       {
         uuid: "c",
         title: "Block",
@@ -246,7 +241,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
 
   it("dedupes when the same property appears at top level and in .properties", async () => {
     const fetcher = vi.fn(async () => null);
-    const blocks: unknown[] = [
+    const blocks: any[] = [
       {
         uuid: "c",
         title: "Block",
@@ -255,7 +250,7 @@ describe("buildTree with relates_to / depends_on properties", () => {
         children: [],
       },
     ];
-    const tree = await buildTree(blocks as never, "Page", false, fetcher, noResolve);
+    const tree = await buildTree(blocks, "Page", false, fetcher, noResolve);
     expect(tree.refs).toEqual([{ kind: "depends_on", targetUuid: TGT_A }]);
   });
 });
@@ -335,6 +330,7 @@ describe("extractDisplayProperties", () => {
 
   it("extracts and formats string, number, and boolean properties", async () => {
     const block: any = {
+      uuid: "u",
       [PROP_DUE]: "2024-05-20",
       properties: {
         [PROP_STATUS]: "active",
@@ -353,6 +349,7 @@ describe("extractDisplayProperties", () => {
 
   it("excludes relates_to and depends_on", async () => {
     const block: any = {
+      uuid: "u",
       [PROP_REL]: "some-uuid",
       properties: {
         "user.property/depends_on-456": "other-uuid",
@@ -365,6 +362,7 @@ describe("extractDisplayProperties", () => {
 
   it("resolves ref-shaped objects to titles", async () => {
     const block: any = {
+      uuid: "u",
       properties: {
         "user.property/link": { "block/uuid": UUID_A },
         "user.property/ref_id": { id: 99 },
@@ -379,6 +377,7 @@ describe("extractDisplayProperties", () => {
 
   it("formats arrays by joining formatted elements", async () => {
     const block: any = {
+      uuid: "u",
       properties: {
         "user.property/list": ["a", 1, true, { uuid: UUID_A }],
       },
@@ -391,6 +390,7 @@ describe("extractDisplayProperties", () => {
 
   it("dedups properties across top-level and .properties", async () => {
     const block: any = {
+      uuid: "u",
       "user.property/same-1": "top",
       properties: {
         "user.property/same-2": "nested",
@@ -404,6 +404,7 @@ describe("extractDisplayProperties", () => {
 
   it("strips markdown from string values", async () => {
     const block: any = {
+      uuid: "u",
       properties: {
         "user.property/note": "This is **bold** and [[Page]]",
       },
@@ -424,29 +425,39 @@ describe("extractTags", () => {
     expect(tags).toEqual(["Multi Word Tag", "tag1"]);
   });
 
-  it("extracts tags from block.properties.tags", async () => {
+  it("extracts tags from block.properties.tags (legacy)", async () => {
     const block: any = { uuid: "u", properties: { tags: ["propTag"] } };
     const tags = await extractTags(block, tagCache, noTags);
     expect(tags).toEqual(["propTag"]);
   });
 
-  it("calls TagResolver for blocks without inline tags", async () => {
-    const resolver = vi.fn(async () => ["dbTag"]);
-    const block: any = { uuid: "u", content: "no inline tags" };
+  it("extracts tags from namespaced keys (DB graph)", async () => {
+    const block: any = {
+      uuid: "u",
+      ":block/tags": ["dbTag"],
+      "user.property/tags-XYZ": "anotherTag"
+    };
+    const tags = await extractTags(block, tagCache, noTags);
+    expect(tags).toEqual(["anotherTag", "dbTag"]);
+  });
+
+  it("calls TagResolver for reliable pass", async () => {
+    const resolver = vi.fn(async () => ["reliableTag"]);
+    const block: any = { uuid: "u", content: "no tags" };
     const tags = await extractTags(block, tagCache, resolver);
-    expect(tags).toEqual(["dbTag"]);
+    expect(tags).toEqual(["reliableTag"]);
     expect(resolver).toHaveBeenCalledWith("u");
   });
 
-  it("dedups and sorts tags from multiple sources", async () => {
-    const resolver = vi.fn(async () => ["dbTag", "tag1"]);
+  it("dedups and sorts tags from all sources", async () => {
+    const resolver = vi.fn(async () => ["reliableTag", "tag1"]);
     const block: any = {
       uuid: "u",
-      content: "#tag1 #tag2",
-      properties: { tags: ["propTag", "tag2"] }
+      content: "#tag1",
+      ":block/tags": ["dbTag"]
     };
     const tags = await extractTags(block, tagCache, resolver);
-    expect(tags).toEqual(["dbTag", "propTag", "tag1", "tag2"]);
+    expect(tags).toEqual(["dbTag", "reliableTag", "tag1"]);
   });
 
   it("caches resolved tags per uuid", async () => {

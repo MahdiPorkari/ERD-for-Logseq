@@ -1,8 +1,14 @@
+/* eslint-disable */
+import "@logseq/libs";
 import type { TreeNode, NodeRef, RelKind } from "./types";
 
-// Block shape from @logseq/libs. Properties in DB graphs can surface as
-// namespaced top-level keys (e.g. `user.property/foo-XYZ`) AND/OR inside a
-// `.properties` sub-object — `[key: string]: unknown` covers both.
+/** Match relates_to / depends_on property idents (with optional random suffix) */
+const REL_KEY_RE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$/;
+/** Match any user property ident */
+const USER_PROP_RE = /^:?user\.property\/(.+)$/;
+/** Match UUIDs */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export interface LogseqBlock {
   uuid: string;
   content?: string;
@@ -16,98 +22,117 @@ export interface LogseqBlock {
 export type RefFetcher = (uuid: string) => Promise<string | null>;
 /** Resolves a block UUID to its tags. */
 export type TagResolver = (uuid: string) => Promise<string[]>;
-
-/** Resolves a numeric `:db/id` entity reference to a block UUID. */
+/** Resolves a numeric ID to a UUID string. */
 export type IdResolver = (id: number) => Promise<string | null>;
 
 let nextId = 0;
 
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const REF_RE = /\[\[([^\[\]]+)\]\]/g;
-const MAX_REF_DEPTH = 3;
-
-/**
- * Match property keys of the form `user.property/relates_to-<suffix>` or
- * `user.property/depends_on-<suffix>`. Leading colon (namespaced-keyword form)
- * tolerated. Suffix part is optional (matches built-in `relates_to` too if
- * Logseq ever ships one). Match on ident is rename-stable; if a user renames
- * the property after creation the connector keeps drawing — acceptable v1.
- */
-const REL_KEY_RE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$/;
-const USER_PROP_RE = /^:?user\.property\/(.+)$/;
-
-/**
- * Replace `[[uuid]]` node references inside text with the referenced entity's
- * title. Page-name refs like `[[Some Page]]` are left untouched (they fall
- * through to the existing wiki-link handling in stripMarkdown).
- *
- * Cache is shared across one tree build to dedupe lookups and to bound the
- * blast radius of cyclic references (a→b→a) alongside MAX_REF_DEPTH.
- */
-export async function resolveNodeRefs(
-  text: string,
-  fetcher: RefFetcher,
-  cache: Map<string, string> = new Map(),
-  depth = 0
-): Promise<string> {
-  if (depth >= MAX_REF_DEPTH || !text.includes("[[")) return text;
-
-  REF_RE.lastIndex = 0;
-  const hits: { match: string; uuid: string }[] = [];
-  let m: RegExpExecArray | null;
-  while ((m = REF_RE.exec(text)) !== null) {
-    const inner = m[1].trim();
-    if (UUID_RE.test(inner)) hits.push({ match: m[0], uuid: inner });
-  }
-  if (hits.length === 0) return text;
-
-  const uniqueUuids = [...new Set(hits.map((h) => h.uuid))].filter((u) => !cache.has(u));
-  await Promise.all(
-    uniqueUuids.map(async (uuid) => {
-      let title: string | null = null;
-      try {
-        title = await fetcher(uuid);
-      } catch { /* unresolved */ }
-      cache.set(uuid, title?.trim() || `↗ ${uuid.slice(0, 8)}`);
-    })
-  );
-
-  let result = text;
-  for (const { match, uuid } of hits) {
-    const resolved = await resolveNodeRefs(cache.get(uuid)!, fetcher, cache, depth + 1);
-    result = result.split(match).join(resolved);
-  }
-  return result;
-}
-
-/**
- * Default id resolver: numeric `:db/id` → block UUID via the Logseq SDK.
- * In DB graphs, :node-typed properties surface ref values as `{ id: <number> }`,
- * and we need the target's UUID to wire the connector to its rendered rect.
- */
+/** Default ID resolver: calls Logseq Editor API. */
 const defaultIdResolver: IdResolver = async (id) => {
   try {
-    const block = await logseq.Editor.getBlock(id);
-    const uuid = (block as Record<string, unknown> | null)?.uuid as string | undefined;
-    return uuid && UUID_RE.test(uuid) ? uuid : null;
+    const b = await logseq.Editor.getBlock(id);
+    return b?.uuid || null;
   } catch {
     return null;
   }
 };
 
+/** Default tag resolver: calls Logseq Datascript query. */
+const defaultTagResolver: TagResolver = async (uuid) => {
+  try {
+    if (typeof logseq === "undefined" || !logseq.DB) return [];
+
+    // Use direct interpolation for #uuid literal - most reliable in Logseq SDK
+    // Pulling both :block/name (lowercase) and :block/original-name
+    const query = `[:find (pull ?t [:block/name :block/original-name :block/title])
+                    :where [?b :block/uuid #uuid "${uuid}"]
+                           [?b :block/tags ?t]]`;
+
+    const results = await logseq.DB.datascriptQuery(query);
+    if (!results || !Array.isArray(results)) return [];
+
+    return results
+      .flat()
+      .map((t: any) => {
+        // Datascript result keys have leading colons in DB graphs
+        return t[":block/original-name"] || t["block/original-name"] ||
+               t[":block/name"] || t["block/name"] ||
+               t[":block/title"] || t["block/title"];
+      })
+      .filter(Boolean) as string[];
+  } catch (err) {
+    console.error("extractTags: datascript query failed", err);
+    return [];
+  }
+};
+
+/** Strip inline markdown formatting from text */
+export function stripMarkdown(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/\{\{\s?renderer\s[^}]*\}\}/g, "")
+    .replace(/\{\{[^}]*\}\}/g, "")
+    .replace(/\*\*(.+?)\*\*/g, "$1")
+    .replace(/\*(.+?)\*/g, "$1")
+    .replace(/__(.+?)__/g, "$1")
+    .replace(/_(.+?)_/g, "$1")
+    .replace(/~~(.+?)~~/g, "$1")
+    .replace(/\`(.+?)\`/g, "$1")
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
+    .replace(/\[\[([^\]]+)\]\]/g, "$1")
+    .trim();
+}
+
 /**
- * Extract target UUIDs from a property value. :node-typed property values come
- * through @logseq/libs in several shapes depending on cardinality and how the
- * SDK normalizes them:
- *
- *   "uuid-string"                              cardinality :one, normalized
- *   { "block/uuid": "uuid-string" }            datascript ref tuple shape
- *   { uuid: "uuid-string" }                    hydrated entity shape
- *   { id: <number> }                           DB-graph short ref (needs resolve)
- *   [<any of the above>]                       cardinality :many
- *
- * Numeric `id` refs need an async lookup; we cache resolved ids per build.
+ * Walk a block's UUID refs and resolve them to titles.
  */
+export async function resolveNodeRefs(
+  text: string,
+  fetcher: RefFetcher,
+  cache: Map<string, string> = new Map(),
+  resolving: Set<string> = new Set()
+): Promise<string> {
+  if (!text) return "";
+
+  const re = /\[\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]\]/gi;
+  const uuids = new Set<string>();
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    uuids.add(m[1]);
+  }
+
+  if (uuids.size === 0) return text;
+
+  let out = text;
+  for (const uuid of uuids) {
+    if (resolving.has(uuid)) continue;
+
+    let resolved = cache.get(uuid);
+    if (resolved === undefined) {
+      try {
+        resolving.add(uuid);
+        resolved = await fetcher(uuid);
+        if (resolved) {
+          resolved = await resolveNodeRefs(resolved, fetcher, cache, resolving);
+          cache.set(uuid, resolved);
+        } else {
+          resolved = `((unresolved-${uuid.slice(0, 8)}))`;
+        }
+      } catch (err) {
+        resolved = `((error-${uuid.slice(0, 8)}))`;
+      } finally {
+        resolving.delete(uuid);
+      }
+    }
+
+    if (resolved) {
+      const escapedUuid = uuid.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      out = out.replace(new RegExp(`\\[\\[${escapedUuid}\\]\\]`, "gi"), resolved);
+    }
+  }
+  return out;
+}
+
 async function extractRefUuids(
   value: unknown,
   idCache: Map<number, string | null>,
@@ -139,18 +164,39 @@ async function extractRefUuids(
   return [];
 }
 
-/**
- * Walk a block's property surface and emit a NodeRef for every value attached
- * to a `relates_to` / `depends_on` property. Checks both top-level namespaced
- * keys (DB-graph style) and the `.properties` sub-object (legacy / fallback).
- * Dedupes if a key appears in both places.
- */
-/**
- * Format a property value for display.
- */
-/**
- * Format a property value for display.
- */
+async function extractRefs(
+  block: LogseqBlock,
+  idCache: Map<number, string | null>,
+  idResolver: IdResolver
+): Promise<{ kind: RelKind; targetUuid: string }[]> {
+  const out: { kind: RelKind; targetUuid: string }[] = [];
+  const seen = new Set<string>();
+
+  const addFrom = async (key: string, value: unknown): Promise<void> => {
+    const m = REL_KEY_RE.exec(key);
+    if (!m) return;
+    const kind = m[1] as RelKind;
+    for (const targetUuid of await extractRefUuids(value, idCache, idResolver)) {
+      const sig = `${kind}|${targetUuid}`;
+      if (seen.has(sig)) continue;
+      seen.add(sig);
+      out.push({ kind, targetUuid });
+    }
+  };
+
+  for (const [key, value] of Object.entries(block)) {
+    await addFrom(key, value);
+  }
+
+  if (block.properties) {
+    for (const [key, value] of Object.entries(block.properties)) {
+      await addFrom(key, value);
+    }
+  }
+
+  return out;
+}
+
 async function formatPropertyValue(
   value: unknown,
   idCache: Map<number, string | null>,
@@ -162,13 +208,12 @@ async function formatPropertyValue(
     const formatted = await Promise.all(
       value.map((v) => formatPropertyValue(v, idCache, idResolver, fetcher))
     );
-    return formatted.filter(Boolean).join(", ");
+    return formatted.filter(v => v !== "").join(", ");
   }
   if (typeof value === "boolean") return value ? "Yes" : "No";
   if (typeof value === "number") return String(value);
   if (typeof value === "string") return stripMarkdown(value);
 
-  // Ref-shaped objects
   if (typeof value === "object") {
     const uuids = await extractRefUuids(value, idCache, idResolver);
     if (uuids.length > 0) {
@@ -185,9 +230,6 @@ async function formatPropertyValue(
   return String(value);
 }
 
-/**
- * Convert a raw property name (e.g. "due_date") to title case ("Due Date").
- */
 function titleCase(name: string): string {
   return name
     .replace(/[_-]/g, " ")
@@ -196,67 +238,43 @@ function titleCase(name: string): string {
     .join(" ");
 }
 
-/**
- * Extract all user-defined properties from a block, excluding relationship
- * properties, and format them for display.
-    tags,
- */
-/** Default tag resolver: calls Logseq Datascript query. */
-/** Default tag resolver: calls Logseq Datascript query. */
-const defaultTagResolver: TagResolver = async (uuid) => {
-  try {
-    if (typeof logseq === "undefined" || !logseq.DB) return [];
-    const query = `[:find (pull ?t [:block/title]) :where [?b :block/uuid #uuid "${uuid}"] [?b :block/tags ?t]]`;
-    const results = await logseq.DB.datascriptQuery(query);
-    if (!results || !Array.isArray(results)) return [];
-
-    return results
-      .flat()
-      .map((t: any) => t["block/title"])
-      .filter(Boolean) as string[];
-  } catch (err) {
-    console.error("extractTags: datascript query failed", err);
-    return [];
-  }
-};
-
-/**
- * Extract tags from a block using inline mentions, properties, and Datascript.
- */
 export async function extractTags(
   block: LogseqBlock,
   tagCache: Map<string, string[]>,
   tagResolver: TagResolver
 ): Promise<string[]> {
   if (!block.uuid) return [];
-
-  if (tagCache.has(block.uuid)) {
-    return tagCache.get(block.uuid)!;
-  }
+  if (tagCache.has(block.uuid)) return tagCache.get(block.uuid)!;
 
   const tags = new Set<string>();
 
-  // 1. Inline tags: #tag and #[[multi word tag]]
   const text = (block.content || block.title || "");
   const inlineTags = text.match(/#\[\[(.+?)\]\]|#([a-zA-Z0-9_-]+)/g);
   if (inlineTags) {
     inlineTags.forEach(t => {
-      if (t.startsWith("#[[")) {
-        tags.add(t.slice(3, -2));
-      } else {
-        tags.add(t.slice(1));
-      }
+      if (t.startsWith("#[[")) tags.add(t.slice(3, -2));
+      else tags.add(t.slice(1));
     });
   }
 
-  // 2. Properties fallback
-  if (block.properties && Array.isArray(block.properties.tags)) {
-    block.properties.tags.forEach((t: unknown) => {
-      if (typeof t === "string") tags.add(t);
-    });
+  const processValue = (val: unknown) => {
+    if (typeof val === "string") tags.add(val);
+    else if (Array.isArray(val)) {
+      val.forEach(v => { if (typeof v === "string") tags.add(v); });
+    }
+  };
+
+  for (const [key, value] of Object.entries(block)) {
+    const k = key.startsWith(":") ? key.slice(1) : key;
+    if (k === "tags" || k === "block/tags" || k === "user.property/tags" || k.startsWith("user.property/tags-")) {
+      processValue(value);
+    }
   }
 
-  // 3. Reliable Datascript pass
+  if (block.properties && block.properties.tags) {
+    processValue(block.properties.tags);
+  }
+
   const resolved = await tagResolver(block.uuid);
   resolved.forEach(t => tags.add(t));
 
@@ -264,6 +282,7 @@ export async function extractTags(
   tagCache.set(block.uuid, sorted);
   return sorted;
 }
+
 export async function extractDisplayProperties(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
@@ -276,118 +295,45 @@ export async function extractDisplayProperties(
     const m = USER_PROP_RE.exec(key);
     if (!m) return;
 
-    // Strip prefix and random suffix. Suffix is always -[a-zA-Z0-9]+ at the end.
     let rawName = m[1];
-    if (/-[a-zA-Z0-9]+$/.test(rawName)) {
-      rawName = rawName.replace(/-[a-zA-Z0-9]+$/, "");
+    const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
+    if (suffixMatch) {
+      rawName = suffixMatch[1];
     }
 
     const normalizedKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+    if (normalizedKey === "relates_to" || normalizedKey === "depends_on" || normalizedKey === "tags") return;
 
-    if (normalizedKey === "relates_to" || normalizedKey === "depends_on") return;
-
-    // Dedup by normalizedKey
     if (!propsMap.has(normalizedKey)) {
       propsMap.set(normalizedKey, { rawName, value });
     }
   };
 
-  // Top-level keys
   for (const [key, value] of Object.entries(block)) {
     processEntry(key, value);
   }
 
-  // Nested properties
-  if (block.properties && typeof block.properties === "object") {
+  if (block.properties) {
     for (const [key, value] of Object.entries(block.properties)) {
       processEntry(key, value);
     }
   }
 
   const out = await Promise.all(
-    Array.from(propsMap.values()).map(async ({ rawName, value }) => ({
-      name: titleCase(rawName),
-      value: await formatPropertyValue(value, idCache, idResolver, fetcher),
-    }))
+    Array.from(propsMap.values()).map(async ({ rawName, value }) => {
+      // Normalize rawName for titleCase to handle suffix-stripped name
+      const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
+      const displayName = suffixMatch ? suffixMatch[1] : rawName;
+      return {
+        name: titleCase(displayName),
+        value: await formatPropertyValue(value, idCache, idResolver, fetcher),
+      };
+    })
   );
 
   return out.sort((a, b) => a.name.localeCompare(b.name));
 }
-async function extractRefs(
-  block: LogseqBlock,
-  idCache: Map<number, string | null>,
-  idResolver: IdResolver
-): Promise<NodeRef[]> {
-  const out: NodeRef[] = [];
-  const seen = new Set<string>(); // `${kind}|${uuid}` dedup
 
-  const addFrom = async (key: string, value: unknown): Promise<void> => {
-    const m = REL_KEY_RE.exec(key);
-    if (!m) return;
-    const kind = m[1] as RelKind;
-    for (const targetUuid of await extractRefUuids(value, idCache, idResolver)) {
-      const sig = `${kind}|${targetUuid}`;
-      if (seen.has(sig)) continue;
-      seen.add(sig);
-      out.push({ kind, targetUuid });
-    }
-  };
-
-  // Top-level keys (preferred DB-graph surface).
-  for (const [key, value] of Object.entries(block)) {
-    await addFrom(key, value);
-  }
-
-  // Legacy / fallback: `.properties` sub-object.
-  const props = block.properties;
-  if (props && typeof props === "object") {
-    for (const [key, value] of Object.entries(props)) {
-      await addFrom(key, value);
-    }
-  }
-
-  return out;
-}
-
-/** Default fetcher: resolves via Logseq SDK (block first, then page). */
-const defaultFetcher: RefFetcher = async (uuid) => {
-  try {
-    const block = await logseq.Editor.getBlock(uuid);
-    if (block) {
-      const t = (block as Record<string, unknown>).title as string | undefined
-        ?? (block as Record<string, unknown>).content as string | undefined;
-      if (t && t.trim()) return t;
-    }
-  } catch { /* fall through */ }
-  try {
-    const page = await logseq.Editor.getPage(uuid);
-    if (page) {
-      const t = (page as Record<string, unknown>).originalName as string | undefined
-        ?? (page as Record<string, unknown>).name as string | undefined
-        ?? (page as Record<string, unknown>).title as string | undefined;
-      if (t && t.trim()) return t;
-    }
-  } catch { /* fall through */ }
-  return null;
-};
-
-/** Strip inline markdown formatting from text */
-function stripMarkdown(text: string): string {
-  return text
-    .replace(/\{\{renderer\s[^}]*\}\}/g, "") // macro renderers
-    .replace(/\{\{[^}]*\}\}/g, "") // other macros
-    .replace(/\*\*(.+?)\*\*/g, "$1") // bold
-    .replace(/\*(.+?)\*/g, "$1") // italic
-    .replace(/__(.+?)__/g, "$1") // bold alt
-    .replace(/_(.+?)_/g, "$1") // italic alt
-    .replace(/~~(.+?)~~/g, "$1") // strikethrough
-    .replace(/`(.+?)`/g, "$1") // inline code
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1") // links
-    .replace(/\[\[([^\]]+)\]\]/g, "$1") // wiki links (page-name fallback — strip brackets only)
-    .trim();
-}
-
-/** Convert a Logseq block tree to an internal TreeNode tree */
 async function convertBlock(
   block: LogseqBlock,
   depth: number,
@@ -431,13 +377,12 @@ async function convertBlock(
   };
 }
 
-/** Build a tree from a page's block tree, wrapping multiple roots in a virtual node */
 export async function buildTree(
   blocks: LogseqBlock[],
   pageName: string,
   showEmpty: boolean,
-  fetcher: RefFetcher = defaultFetcher,
-  idResolver: IdResolver = defaultIdResolver,
+  fetcher: RefFetcher = async () => null,
+  idResolver: IdResolver = async () => null,
   tagResolver: TagResolver = defaultTagResolver
 ): Promise<TreeNode> {
   nextId = 0;
@@ -452,23 +397,21 @@ export async function buildTree(
   }
 
   if (children.length === 1 && children[0].name) {
-    // Single top-level block becomes root
     children[0].depth = 0;
     return reindex(children[0], 0);
   }
 
-  // Multiple top-level blocks: wrap in a virtual root
   return {
     name: pageName,
     children,
     depth: 0,
     id: nextId++,
     uuid: "",
+    tags: [],
     refs: [],
   };
 }
 
-/** Re-index depths after restructuring */
 function reindex(node: TreeNode, depth: number): TreeNode {
   node.depth = depth;
   for (const child of node.children) {
@@ -477,14 +420,6 @@ function reindex(node: TreeNode, depth: number): TreeNode {
   return node;
 }
 
-/**
- * Prepare a tree for rendering based on depth mode.
- *
- * - "recursive": prune at maxDepth, preserve full tree structure for
- *   views to render each level as independent connected nodes.
- * - "flat": prune at maxDepth, then collapse to 3 levels with
- *   breadcrumb-style leaf labels (e.g. "A > B > C").
- */
 export function flattenDeep(
   root: TreeNode,
   maxDepth: number,
@@ -492,13 +427,10 @@ export function flattenDeep(
 ): TreeNode {
   const clone = structuredClone(root);
   pruneAtDepth(clone, maxDepth);
-  if (mode === "flat") {
-    collapseToThreeLevels(clone);
-  }
+  if (mode === "flat") collapseToThreeLevels(clone);
   return clone;
 }
 
-/** Remove children from nodes at or beyond maxDepth */
 function pruneAtDepth(node: TreeNode, maxDepth: number): void {
   if (node.depth >= maxDepth - 1) {
     node.children = [];
@@ -509,7 +441,6 @@ function pruneAtDepth(node: TreeNode, maxDepth: number): void {
   }
 }
 
-/** Collapse a tree of arbitrary depth into 3 levels with breadcrumb leaf labels */
 function collapseToThreeLevels(root: TreeNode): void {
   for (const branch of root.children) {
     const newLeaves: TreeNode[] = [];
@@ -537,29 +468,37 @@ function gatherLeaves(
   if (node.children.length === 0) {
     out.push({ ...node, name: label, depth: targetDepth, children: [] });
   } else {
-    for (const child of node.children) {
-      gatherLeaves(child, label, out, targetDepth);
-    }
+    for (const child of node.children) gatherLeaves(child, label, out, targetDepth);
   }
 }
 
-/** Fetch the current page's block tree from Logseq and build an internal tree */
+const defaultFetcher: RefFetcher = async (uuid) => {
+  try {
+    const block = await logseq.Editor.getBlock(uuid);
+    if (block) {
+      const t = (block as any).title ?? (block as any).content;
+      if (t && t.trim()) return t;
+    }
+  } catch { }
+  try {
+    const page = await logseq.Editor.getPage(uuid);
+    if (page) {
+      const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
+      if (t && t.trim()) return t;
+    }
+  } catch { }
+  return null;
+};
+
 export async function fetchTree(showEmpty: boolean): Promise<TreeNode | null> {
   const page = await logseq.Editor.getCurrentPage();
   if (!page) return null;
-
-  const pageName =
-    (page as Record<string, unknown>).originalName as string ??
-    (page as Record<string, unknown>).name as string ??
-    "Untitled";
-
+  const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
   const blocks = await logseq.Editor.getPageBlocksTree(pageName);
   if (!blocks || blocks.length === 0) return null;
-
   return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, defaultTagResolver);
 }
 
-/** Fetch a specific block and its children as a tree */
 export async function fetchBlockTree(
   uuid: string,
   showEmpty: boolean,
@@ -569,43 +508,21 @@ export async function fetchBlockTree(
 ): Promise<TreeNode | null> {
   const block = await logseq.Editor.getBlock(uuid, { includeChildren: true });
   if (!block) return null;
-
   nextId = 0;
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
   const tagCache = new Map<string, string[]>();
-  const node = await convertBlock(
-    block as unknown as LogseqBlock,
-    0,
-    showEmpty,
-    fetcher,
-    cache,
-    idResolver,
-    idCache,
-    tagResolver,
-    tagCache
-  );
-  return node;
+  return await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, fetcher, cache, idResolver, idCache, tagResolver, tagCache);
 }
 
-/**
- * Drop any refs whose target UUID is not present elsewhere in the tree.
- * Runs after `flattenDeep` so refs into pruned subtrees are also dropped.
- * Returns a structurally-cloned tree (input untouched).
- */
 export function filterIntraTreeRefs(root: TreeNode): TreeNode {
   const present = new Set<string>();
   (function collect(n: TreeNode): void {
     if (n.uuid) present.add(n.uuid);
     for (const c of n.children) collect(c);
   })(root);
-
   return (function walk(n: TreeNode): TreeNode {
     const refs = n.refs?.filter((r) => present.has(r.targetUuid));
-    return {
-      ...n,
-      children: n.children.map(walk),
-      refs: refs && refs.length ? refs : [],
-    };
+    return { ...n, children: n.children.map(walk), refs: refs && refs.length ? refs : [] };
   })(root);
 }
