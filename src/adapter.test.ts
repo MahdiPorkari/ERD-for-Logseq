@@ -53,3 +53,16 @@ describe("buildTree with tags", () => {
     expect(tree.tags![0].title).toBe("Tag1");
   });
 });
+
+describe("DefaultTagProvider improvements", () => {
+  it("extracts tags even if they are strings", async () => {
+    const block = {
+      uuid: "u1",
+      "user.property/tags-abc": "#Tag1"
+    };
+    const provider = new DefaultTagProvider(new Map([["u1", block as any]]));
+    const tags = await provider.getTags("u1");
+    expect(tags).toHaveLength(1);
+    expect(tags[0].title).toBe("#Tag1");
+  });
+});

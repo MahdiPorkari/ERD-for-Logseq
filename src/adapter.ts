@@ -70,7 +70,10 @@ export class DefaultTagProvider implements TagProvider {
   }
 
   private processPotentialTagValue(val: unknown, tags: Map<string, TagInfo>) {
-    if (Array.isArray(val)) {
+    if (typeof val === "string") {
+      const title = val.trim();
+      if (title) tags.set(title, { uuid: title, title });
+    } else if (Array.isArray(val)) {
       val.forEach(v => this.processPotentialTagValue(v, tags));
     } else if (typeof val === "object" && val !== null) {
       const v = val as any;
