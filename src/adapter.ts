@@ -6,10 +6,13 @@ const REL_KEY_RE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+
 const USER_PROP_RE = /^:?user\.property\/(.+)$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Extended block interface to support Logseq DB-style namespaced keys */
 export interface LogseqBlock {
   uuid: string;
   content?: string;
   title?: string;
+  ":block/title"?: string;
+  "block/title"?: string;
   children?: LogseqBlock[];
   properties?: Record<string, unknown>;
   [key: string]: unknown;
@@ -34,52 +37,104 @@ export class DefaultTagProvider implements TagProvider {
 
   async getTags(blockUuid: string): Promise<readonly TagInfo[]> {
     if (this.cache.has(blockUuid)) return this.cache.get(blockUuid)!;
-    const tags = new Map<string, TagInfo>();
-    const block = this.blockMap?.get(blockUuid);
-    if (block) this.extractFromObject(block, tags);
+
+    // Key: normalized title (lowercase, trimmed), Value: TagInfo
+    const tagsMap = new Map<string, TagInfo>();
+
+    // --- Tier 1: Authoritative Datascript query ---
     if (typeof logseq !== "undefined" && logseq.DB) {
       try {
-        const query = `[:find (pull ?t [:block/uuid :block/name :block/original-name :block/title])
-                        :where [?b :block/uuid #uuid "${blockUuid}"]
+        const query = `[:find (pull ?t [:block/uuid :block/title])
+                        :in $ ?uuid
+                        :where [?b :block/uuid ?uuid]
                                [?b :block/tags ?t]]`;
-        const results = await logseq.DB.datascriptQuery(query);
+        const results = await logseq.DB.datascriptQuery(query, `#uuid "${blockUuid}"`);
         if (Array.isArray(results)) {
           results.flat().forEach((t: any) => {
+            const title = t[":block/title"] || t["block/title"];
             const uuid = t[":block/uuid"] || t["block/uuid"];
-            const title = t[":block/original-name"] || t["block/original-name"] ||
-                          t[":block/name"] || t["block/name"] ||
-                          t[":block/title"] || t["block/title"];
-            if (uuid && title) tags.set(uuid, { uuid, title });
+            if (title) {
+              const normalized = title.toLowerCase().trim();
+              if (normalized) {
+                tagsMap.set(normalized, { uuid: uuid || title, title });
+              }
+            }
           });
         }
-      } catch (err) { console.error("TagProvider query failed", err); }
+      } catch (err) { console.error("TagProvider Tier 1 query failed", err); }
     }
-    const result = Array.from(tags.values()).sort((a, b) => a.title.localeCompare(b.title));
+
+    // Fetch block for Tiers 2 & 3 fallbacks
+    let block = this.blockMap?.get(blockUuid);
+    if (!block && typeof logseq !== "undefined" && logseq.Editor) {
+      block = await logseq.Editor.getBlock(blockUuid) as any;
+    }
+
+    if (block) {
+      // --- Tier 2: Legacy inline fallback (regex) ---
+      const content = block.content || block.title || block[":block/title"] || block["block/title"] || "";
+      const inlineRegex = /#([a-zA-Z0-9_-]+)|#?\[\[([^\]]+)\]\]/g;
+      let match;
+      while ((match = inlineRegex.exec(content)) !== null) {
+        const raw = match[1] || match[2];
+        if (raw) {
+          const title = raw.trim();
+          const normalized = title.toLowerCase();
+          if (normalized && !tagsMap.has(normalized)) {
+            tagsMap.set(normalized, { uuid: title, title });
+          }
+        }
+      }
+
+      // --- Tier 3: Properties fallback ---
+      this.extractFromProperties(block, tagsMap);
+    }
+
+    const result = Array.from(tagsMap.values()).sort((a, b) => a.title.localeCompare(b.title));
     this.cache.set(blockUuid, result);
     return result;
   }
 
-  private extractFromObject(obj: Record<string, any>, tags: Map<string, TagInfo>) {
+  private extractFromProperties(obj: Record<string, any>, tagsMap: Map<string, TagInfo>) {
     for (const [key, value] of Object.entries(obj)) {
       const k = key.startsWith(":") ? key.slice(1) : key;
       if (k === "tags" || k === "block/tags" || k.startsWith("user.property/tags")) {
-        this.processPotentialTagValue(value, tags);
+        this.processValue(value, tagsMap);
       }
     }
-    if (obj.properties?.tags) this.processPotentialTagValue(obj.properties.tags, tags);
+    if (obj.properties?.tags) {
+      this.processValue(obj.properties.tags, tagsMap);
+    }
   }
 
-  private processPotentialTagValue(val: unknown, tags: Map<string, TagInfo>) {
+  private processValue(val: unknown, tagsMap: Map<string, TagInfo>) {
     if (typeof val === "string") {
-      const title = val.trim();
-      if (title) tags.set(title, { uuid: title, title });
+      // Handle comma or space separated tags, also stripping # and [[]]
+      const parts = val.split(/[,\s]+/).filter(Boolean);
+      for (const p of parts) {
+        let title = p.trim();
+        // Strip # prefix
+        if (title.startsWith("#")) title = title.slice(1);
+        // Strip [[ ]]
+        if (title.startsWith("[[") && title.endsWith("]]")) title = title.slice(2, -2);
+
+        const normalized = title.toLowerCase().trim();
+        if (normalized && !tagsMap.has(normalized)) {
+          tagsMap.set(normalized, { uuid: title, title });
+        }
+      }
     } else if (Array.isArray(val)) {
-      val.forEach(v => this.processPotentialTagValue(v, tags));
+      val.forEach(v => this.processValue(v, tagsMap));
     } else if (typeof val === "object" && val !== null) {
       const v = val as any;
+      const title = v.title || v.name || v[":block/title"] || v["block/title"] || v[":block/original-name"] || v["block/original-name"];
       const uuid = v.uuid || v[":block/uuid"] || v["block/uuid"];
-      const title = v.title || v.name || v[":block/original-name"] || v["block/original-name"] || v[":block/name"] || v["block/name"];
-      if (uuid && title) tags.set(uuid, { uuid, title });
+      if (title) {
+        const normalized = title.toLowerCase().trim();
+        if (normalized && !tagsMap.has(normalized)) {
+          tagsMap.set(normalized, { uuid: uuid || title, title });
+        }
+      }
     }
   }
 }
@@ -263,7 +318,7 @@ async function convertBlock(
   idCache: Map<number, string | null>,
   tagProvider: TagProvider
 ): Promise<TreeNode | null> {
-  const rawText = block.content ?? block.title ?? "";
+  const rawText = block.content ?? block.title ?? (block as any)[":block/title"] ?? "";
   const resolved = await resolveNodeRefs(rawText, fetcher, cache);
   const name = stripMarkdown(resolved);
   if (!name && (!block.children || block.children.length === 0) && !showEmpty) return null;
@@ -365,7 +420,7 @@ const defaultFetcher: RefFetcher = async (uuid) => {
   try {
     const block = await logseq.Editor.getBlock(uuid);
     if (block) {
-      const t = (block as any).title ?? (block as any).content;
+      const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
       if (t && t.trim()) return t;
     }
   } catch { }
