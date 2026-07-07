@@ -37,20 +37,24 @@ describe("DefaultTagProvider", () => {
     });
   });
 
-  it("extracts tags from authoritative Tier 1 query", async () => {
-    const tagUuid = "tag-uuid";
-    const tagTitle = "AuthoritativeTag";
-    (logseq.DB.datascriptQuery as any).mockResolvedValueOnce([
-      [{ ":block/uuid": tagUuid, ":block/title": tagTitle }]
-    ]);
+  it("extracts tags from Tier 1a and Tier 1b queries", async () => {
+    const tagUuid1 = "tag-uuid-1";
+    const tagTitle1 = "TagA";
+    const tagUuid2 = "tag-uuid-2";
+    const tagTitle2 = "TagB";
+
+    // Mock Tier 1a and Tier 1b
+    (logseq.DB.datascriptQuery as any)
+      .mockResolvedValueOnce([[{ ":block/uuid": tagUuid1, ":block/title": tagTitle1 }]]) // Query 1
+      .mockResolvedValueOnce([[{ ":block/uuid": tagUuid2, ":block/title": tagTitle2 }]]); // Query 2
 
     const provider = new DefaultTagProvider();
     const tags = await provider.getTags("b1");
 
-    expect(tags).toHaveLength(1);
-    expect(tags[0].title).toBe(tagTitle);
-    expect(tags[0].uuid).toBe(tagUuid);
-    expect(logseq.DB.datascriptQuery).toHaveBeenCalledWith(expect.any(String), '#uuid "b1"');
+    expect(tags).toHaveLength(2);
+    expect(tags[0].title).toBe("TagA");
+    expect(tags[1].title).toBe("TagB");
+    expect(logseq.DB.datascriptQuery).toHaveBeenCalledTimes(2);
   });
 
   it("falls back to Tier 2 regex parsing of content", async () => {
@@ -69,23 +73,39 @@ describe("DefaultTagProvider", () => {
     expect(titles).toContain("Direct Link");
   });
 
-  it("falls back to Tier 3 properties and dedupes correctly", async () => {
+  it("falls back to Tier 3 properties and handles multi-word tags", async () => {
     const block: LogseqBlock = {
       uuid: "b1",
       content: "#tag1",
       properties: {
-        tags: "tag1, tag2, #tag3, [[tag4]]"
+        tags: "tag1, tag2, #tag3, [[tag 4]], [[Multi Word Tag]]"
       }
     };
     const provider = new DefaultTagProvider(new Map([["b1", block]]));
     const tags = await provider.getTags("b1");
 
-    expect(tags).toHaveLength(4);
+    expect(tags).toHaveLength(5);
     const titles = tags.map(t => t.title);
     expect(titles).toContain("tag1");
     expect(titles).toContain("tag2");
     expect(titles).toContain("tag3");
-    expect(titles).toContain("tag4");
+    expect(titles).toContain("tag 4");
+    expect(titles).toContain("Multi Word Tag");
+  });
+
+  it("handles complex inline regex correctly", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      content: "Mixed [[Multi Word Tag]] and #simpleTag and [[Another Tag]]"
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+
+    expect(tags).toHaveLength(3);
+    const titles = tags.map(t => t.title);
+    expect(titles).toContain("Multi Word Tag");
+    expect(titles).toContain("simpleTag");
+    expect(titles).toContain("Another Tag");
   });
 
   it("merges all tiers and sorts results", async () => {
