@@ -37,41 +37,24 @@ describe("DefaultTagProvider", () => {
     });
   });
 
-  it("extracts tags from Tier 1a and Tier 1b queries", async () => {
-    const tagUuid1 = "tag-uuid-1";
-    const tagTitle1 = "TagA";
-    const tagUuid2 = "tag-uuid-2";
-    const tagTitle2 = "TagB";
-
-    // Mock Tier 1a and Tier 1b
-    (logseq.DB.datascriptQuery as any)
-      .mockResolvedValueOnce([[{ ":block/uuid": tagUuid1, ":block/title": tagTitle1 }]]) // Query 1
-      .mockResolvedValueOnce([[{ ":block/uuid": tagUuid2, ":block/title": tagTitle2 }]]); // Query 2
+  it("extracts tags from authoritative Tier 1 query", async () => {
+    const tagUuid = "tag-uuid";
+    const tagTitle = "AuthoritativeTag";
+    (logseq.DB.datascriptQuery as any).mockResolvedValueOnce([
+      [{ ":block/uuid": tagUuid, ":block/title": tagTitle }]
+    ]);
 
     const provider = new DefaultTagProvider();
     const tags = await provider.getTags("b1");
 
-    expect(tags).toHaveLength(2);
-    expect(tags[0].title).toBe("TagA");
-    expect(tags[1].title).toBe("TagB");
-    expect(logseq.DB.datascriptQuery).toHaveBeenCalledTimes(2);
+    expect(tags).toHaveLength(1);
+    expect(tags[0].title).toBe(tagTitle);
+    expect(tags[0].uuid).toBe(tagUuid);
+    expect(logseq.DB.datascriptQuery).toHaveBeenCalledTimes(1);
+    expect(logseq.DB.datascriptQuery).toHaveBeenCalledWith(expect.any(String), '#uuid "b1"');
   });
 
-  it("falls back to Tier 2 regex parsing of content", async () => {
-    const block: LogseqBlock = {
-      uuid: "b1",
-      content: "Hello #world and #[[Multi Word]] and [[Direct Link]]"
-    };
-    const provider = new DefaultTagProvider(new Map([["b1", block]]));
-    const tags = await provider.getTags("b1");
 
-    // world, Multi Word, Direct Link
-    expect(tags).toHaveLength(3);
-    const titles = tags.map(t => t.title);
-    expect(titles).toContain("world");
-    expect(titles).toContain("Multi Word");
-    expect(titles).toContain("Direct Link");
-  });
 
   it("falls back to Tier 3 properties and handles multi-word tags", async () => {
     const block: LogseqBlock = {
@@ -93,20 +76,41 @@ describe("DefaultTagProvider", () => {
     expect(titles).toContain("Multi Word Tag");
   });
 
-  it("handles complex inline regex correctly", async () => {
+
+
+  it("ignores page references in non-tag properties", async () => {
     const block: LogseqBlock = {
       uuid: "b1",
-      content: "Mixed [[Multi Word Tag]] and #simpleTag and [[Another Tag]]"
+      properties: {
+        tags: "RealTag",
+        status: "[[Doing]]",
+        project: "[[Logseq ERD]]"
+      }
+    };
+    const provider = new DefaultTagProvider(new Map([["b1", block]]));
+    const tags = await provider.getTags("b1");
+
+    expect(tags).toHaveLength(1);
+    expect(tags[0].title).toBe("RealTag");
+  });
+
+  it("handles multi-word tags with commas correctly", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      properties: {
+        tags: "[[Direct Link]], Important, [[Another Tag]]"
+      }
     };
     const provider = new DefaultTagProvider(new Map([["b1", block]]));
     const tags = await provider.getTags("b1");
 
     expect(tags).toHaveLength(3);
     const titles = tags.map(t => t.title);
-    expect(titles).toContain("Multi Word Tag");
-    expect(titles).toContain("simpleTag");
+    expect(titles).toContain("Direct Link");
+    expect(titles).toContain("Important");
     expect(titles).toContain("Another Tag");
   });
+
 
   it("merges all tiers and sorts results", async () => {
     (logseq.DB.datascriptQuery as any).mockResolvedValueOnce([
@@ -114,9 +118,8 @@ describe("DefaultTagProvider", () => {
     ]);
     const block: LogseqBlock = {
       uuid: "b1",
-      content: "#Apple",
       properties: {
-        tags: "Banana"
+        tags: "Banana, Apple"
       }
     };
     const provider = new DefaultTagProvider(new Map([["b1", block]]));
@@ -188,7 +191,9 @@ describe("DefaultTagProvider edge cases", () => {
     vi.stubGlobal("logseq", undefined);
     const block: LogseqBlock = {
       uuid: "b1",
-      content: "#tag1"
+      properties: {
+        tags: "tag1"
+      }
     };
     const provider = new DefaultTagProvider(new Map([["b1", block]]));
     const tags = await provider.getTags("b1");
