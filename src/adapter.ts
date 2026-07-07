@@ -2,9 +2,34 @@
 import "@logseq/libs";
 import type { TreeNode, NodeRef, RelKind, TagInfo } from "./types";
 
-const REL_KEY_RE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$/;
+const REL_KEY_RE_BASE = /^:?user\.property\/(relates_to|depends_on)(?:-[A-Za-z0-9_-]+)?$/;
+const CUSTOM_REL_KEY_RE = /^:?user\.property\/(.+)(?:-[A-Za-z0-9_-]+)?$/;
 const USER_PROP_RE = /^:?user\.property\/(.+)$/;
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Discover all custom properties in the Logseq DB with type 'node'.
+ * Excludes built-in relationships to avoid duplication in settings.
+ */
+export async function discoverNodeProperties(): Promise<string[]> {
+  if (typeof logseq === "undefined" || !logseq.DB) return [];
+  try {
+    const query = `[:find (pull ?p [:block/name :logseq.property/schema])
+                    :where [?p :block/type "property"]
+                           [?p :logseq.property/schema ?s]
+                           [(= (:type ?s) "node")]]`;
+    const results = await logseq.DB.datascriptQuery(query);
+    if (!Array.isArray(results)) return [];
+    return results
+      .flat()
+      .map((p: any) => p["block/name"] || p[":block/name"])
+      .filter((name: string) => name && name !== "relates_to" && name !== "depends_on" && name !== "relates-to" && name !== "depends-on");
+  } catch (err) {
+    console.error("discoverNodeProperties failed", err);
+    return [];
+  }
+}
+
+const REAL_UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 /** Extended block interface to support Logseq DB-style namespaced keys */
 export interface LogseqBlock {
@@ -27,8 +52,13 @@ let nextId = 0;
 const defaultIdResolver: IdResolver = async (id) => {
   try {
     const b = await logseq.Editor.getBlock(id);
-    return b?.uuid || null;
-  } catch { return null; }
+    if (b?.uuid) return b.uuid;
+  } catch { }
+  try {
+    const p = await logseq.Editor.getPage(id);
+    if (p?.uuid) return p.uuid;
+  } catch { }
+  return null;
 };
 
 export class DefaultTagProvider implements TagProvider {
@@ -37,12 +67,8 @@ export class DefaultTagProvider implements TagProvider {
 
   async getTags(blockUuid: string): Promise<readonly TagInfo[]> {
     if (this.cache.has(blockUuid)) return this.cache.get(blockUuid)!;
-
-    // Key: normalized title (lowercase, trimmed), Value: TagInfo
     const tagsMap = new Map<string, TagInfo>();
 
-    // --- Tier 1: Authoritative Datascript query ---
-    // Strictly queries :block/tags to find actual tags (inline #tag or [[tag]] or tags:: property)
     if (typeof logseq !== "undefined" && logseq.DB) {
       try {
         const query = `[:find (pull ?t [:block/uuid :block/title])
@@ -65,13 +91,10 @@ export class DefaultTagProvider implements TagProvider {
       } catch (err) { console.error("TagProvider Datascript query failed", err); }
     }
 
-    // Tier 2: Properties fallback
-    // Strictly checks only 'tags' related properties to avoid capturing other page references
     let block = this.blockMap?.get(blockUuid);
     if (!block && typeof logseq !== "undefined" && logseq.Editor) {
       block = await logseq.Editor.getBlock(blockUuid) as any;
     }
-
     if (block) {
       this.extractFromProperties(block, tagsMap);
     }
@@ -82,14 +105,12 @@ export class DefaultTagProvider implements TagProvider {
   }
 
   private extractFromProperties(obj: Record<string, any>, tagsMap: Map<string, TagInfo>) {
-    // Only process values for keys that are strictly related to tags
     for (const [key, value] of Object.entries(obj)) {
       const k = key.startsWith(":") ? key.slice(1) : key;
       if (k === "tags" || k === "block/tags" || k.startsWith("user.property/tags")) {
         this.processValue(value, tagsMap);
       }
     }
-    // Also check the nested properties object if it exists
     if (obj.properties) {
       for (const [key, value] of Object.entries(obj.properties)) {
         if (key === "tags") {
@@ -99,93 +120,88 @@ export class DefaultTagProvider implements TagProvider {
     }
   }
 
-  private processValue(val: unknown, tagsMap: Map<string, TagInfo>) {
-    if (typeof val === "string") {
-      // Split on commas first to separate multiple tags
-      const items = val.split(/\s*,\s*/);
-      for (let item of items) {
-        item = item.trim();
-        if (!item) continue;
-
-        let title = item;
-        // If it's enclosed in [[...]], extract inner text (multi-word support)
-        const bracketMatch = title.match(/^\[\[(.+)\]\]$/);
-        if (bracketMatch) {
-          title = bracketMatch[1].trim();
-        } else {
-          // Remove leading '#' if present
-          if (title.startsWith("#")) title = title.slice(1).trim();
-        }
-
+  private processValue(value: unknown, tagsMap: Map<string, TagInfo>) {
+    if (!value) return;
+    if (Array.isArray(value)) {
+      value.forEach(v => this.processValue(v, tagsMap));
+    } else if (typeof value === "string") {
+      const rawMatches = value.split(",").map(s => s.trim()).filter(Boolean);
+      rawMatches.forEach(tag => {
+        let title = tag.startsWith("#") ? tag.slice(1) : tag;
+        title = title.replace(/^\[\[(.*)\]\]$/, "$1");
         const normalized = title.toLowerCase().trim();
-        if (normalized && !tagsMap.has(normalized)) {
-          tagsMap.set(normalized, { uuid: title, title });
+        if (normalized) {
+          if (!tagsMap.has(normalized)) {
+            tagsMap.set(normalized, { uuid: title, title });
+          }
         }
-      }
-    } else if (Array.isArray(val)) {
-      val.forEach(v => this.processValue(v, tagsMap));
-    } else if (typeof val === "object" && val !== null) {
-      const v = val as any;
-      const title = v.title || v.name || v[":block/title"] || v["block/title"] || v[":block/original-name"] || v["block/original-name"];
-      const uuid = v.uuid || v[":block/uuid"] || v["block/uuid"];
+      });
+    } else if (typeof value === "object") {
+      const obj = value as Record<string, any>;
+      let title = obj[":block/title"] || obj["block/title"] || obj["title"] || obj["name"];
+      const uuid = obj[":block/uuid"] || obj["block/uuid"] || obj["uuid"];
       if (title) {
-        const normalized = title.toLowerCase().trim();
-        if (normalized && !tagsMap.has(normalized)) {
-          tagsMap.set(normalized, { uuid: uuid || title, title });
+        if (typeof title === "string") title = title.replace(/^\[\[(.*)\]\]$/, "$1");
+        const normalized = title.toString().toLowerCase().trim();
+        if (normalized) {
+          tagsMap.set(normalized, { uuid: uuid || title.toString(), title: title.toString() });
         }
       }
     }
   }
 }
 
-export function stripMarkdown(text: string): string {
-  if (!text) return "";
-  return text
-    .replace(/\{\{\s?renderer\s[^}]*\}\}/g, "")
-    .replace(/\{\{[^}]*\}\}/g, "")
-    .replace(/\*\*(.+?)\*\*/g, "$1")
-    .replace(/\*(.+?)\*/g, "$1")
-    .replace(/__(.+?)__/g, "$1")
-    .replace(/_(.+?)_/g, "$1")
-    .replace(/~~(.+?)~~/g, "$1")
-    .replace(/\`(.+?)\`/g, "$1")
-    .replace(/\[([^\]]+)\]\([^)]+\)/g, "$1")
-    .replace(/\[\[([^\]]+)\]\]/g, "$1")
-    .trim();
-}
+const REF_RE = /\[\[([^\]]+)\]\]|\(\(([^\)]+)\)\)/g;
 
+/**
+ * Recursively resolve [[page]] and ((block)) references in text.
+ * Uses a depth limit to prevent infinite loops.
+ */
 export async function resolveNodeRefs(
   text: string,
   fetcher: RefFetcher,
   cache: Map<string, string> = new Map(),
   depth: number = 0
 ): Promise<string> {
-  if (!text || depth > 10) return text;
-  const re = /\[\[([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})\]\]/gi;
-  const matches = Array.from(text.matchAll(re));
+  if (!text || depth > 10) return text || "";
+  const matches = Array.from(text.matchAll(REF_RE));
   if (matches.length === 0) return text;
 
   let out = text;
+  let changed = false;
+
   for (const m of matches) {
-    const uuid = m[1];
-    const fullMatch = m[0];
-    let resolved: string | null | undefined = cache.get(uuid);
-    if (resolved === undefined) {
-      try {
-        const title = await fetcher(uuid);
-        if (title) {
-          resolved = await resolveNodeRefs(title, fetcher, cache, depth + 1);
-          cache.set(uuid, resolved);
-        } else {
-          resolved = `((unresolved-${uuid.slice(0, 8)}))`;
-        }
-      } catch (err) {
-        resolved = `((error-${uuid.slice(0, 8)}))`;
+    const raw = m[0];
+    const ref = m[1] || m[2];
+    let resolved: string | null = null;
+    if (cache.has(ref)) {
+      resolved = cache.get(ref)!;
+    } else {
+      resolved = await fetcher(ref);
+      if (resolved) cache.set(ref, resolved);
+    }
+
+    if (resolved && resolved !== raw) {
+      const newOut = out.split(raw).join(resolved);
+      if (newOut !== out) {
+        out = newOut;
+        changed = true;
       }
     }
-    out = out.replace(fullMatch, resolved!);
+  }
+
+  if (changed) {
+    return resolveNodeRefs(out, fetcher, cache, depth + 1);
   }
   return out;
+}
+
+export function stripMarkdown(text: string): string {
+  if (!text) return "";
+  return text
+    .replace(/[#*`~]/g, "")
+    .replace(/\[([^\]]+)\]\([^\)]+\)/g, "$1")
+    .trim();
 }
 
 async function extractRefUuids(
@@ -193,17 +209,19 @@ async function extractRefUuids(
   idCache: Map<number, string | null>,
   idResolver: IdResolver
 ): Promise<string[]> {
-  if (value == null) return [];
+  if (!value) return [];
   if (Array.isArray(value)) {
-    const all = await Promise.all(value.map((v) => extractRefUuids(v, idCache, idResolver)));
-    return all.flat();
+    const results = await Promise.all(value.map((v) => extractRefUuids(v, idCache, idResolver)));
+    return results.flat();
   }
-  if (typeof value === "string") return UUID_RE.test(value) ? [value] : [];
+  if (typeof value === "string") {
+    if (REAL_UUID_RE.test(value)) return [value];
+    return [];
+  }
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    const blockUuid = obj["block/uuid"];
-    if (typeof blockUuid === "string" && UUID_RE.test(blockUuid)) return [blockUuid];
-    if (typeof obj.uuid === "string" && UUID_RE.test(obj.uuid as string)) return [obj.uuid as string];
+    const blockUuid = obj["block/uuid"] || obj.uuid;
+    if (typeof blockUuid === "string" && REAL_UUID_RE.test(blockUuid)) return [blockUuid];
     if (typeof obj.id === "number") {
       const id = obj.id as number;
       let cached = idCache.get(id);
@@ -217,17 +235,27 @@ async function extractRefUuids(
   return [];
 }
 
-async function extractRefs(
+export async function extractRefs(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
-  idResolver: IdResolver
+  idResolver: IdResolver,
+  enabledProperties: Set<string> = new Set()
 ): Promise<{ kind: RelKind; targetUuid: string }[]> {
   const out: { kind: RelKind; targetUuid: string }[] = [];
   const seen = new Set<string>();
   const addFrom = async (key: string, value: unknown): Promise<void> => {
-    const m = REL_KEY_RE.exec(key);
-    if (!m) return;
-    const kind = m[1] as RelKind;
+    let kind: RelKind | null = null;
+    const mBase = REL_KEY_RE_BASE.exec(key);
+    if (mBase) {
+      kind = mBase[1];
+    } else {
+      const mCustom = CUSTOM_REL_KEY_RE.exec(key);
+      if (mCustom && enabledProperties.has(mCustom[1])) {
+        kind = mCustom[1];
+      }
+    }
+    if (!kind) return;
+
     const uuids = await extractRefUuids(value, idCache, idResolver);
     for (const targetUuid of uuids) {
       const sig = `${kind}|${targetUuid}`;
@@ -276,7 +304,8 @@ export async function extractDisplayProperties(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
   idResolver: IdResolver,
-  fetcher: RefFetcher
+  fetcher: RefFetcher,
+  enabledProperties: Set<string> = new Set()
 ): Promise<{ name: string; value: string }[]> {
   const propsMap = new Map<string, { rawName: string; value: unknown }>();
   const processEntry = (key: string, value: unknown) => {
@@ -286,7 +315,7 @@ export async function extractDisplayProperties(
     const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
     if (suffixMatch) rawName = suffixMatch[1];
     const normalizedKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
-    if (normalizedKey === "relates_to" || normalizedKey === "depends_on" || normalizedKey === "tags") return;
+    if (normalizedKey === "relates_to" || normalizedKey === "depends_on" || normalizedKey === "tags" || enabledProperties.has(normalizedKey)) return;
     if (!propsMap.has(normalizedKey)) propsMap.set(normalizedKey, { rawName, value });
   };
   for (const [key, value] of Object.entries(block)) processEntry(key, value);
@@ -315,19 +344,20 @@ async function convertBlock(
   cache: Map<string, string>,
   idResolver: IdResolver,
   idCache: Map<number, string | null>,
-  tagProvider: TagProvider
+  tagProvider: TagProvider,
+  enabledProperties: Set<string> = new Set()
 ): Promise<TreeNode | null> {
   const rawText = block.content ?? block.title ?? (block as any)[":block/title"] ?? "";
   const resolved = await resolveNodeRefs(rawText, fetcher, cache);
   const name = stripMarkdown(resolved);
   if (!name && (!block.children || block.children.length === 0) && !showEmpty) return null;
-  const properties = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+  const properties = await extractDisplayProperties(block, idCache, idResolver, fetcher, enabledProperties);
   const tags = await tagProvider.getTags(block.uuid);
-  const refs = await extractRefs(block, idCache, idResolver);
+  const refs = await extractRefs(block, idCache, idResolver, enabledProperties);
   const children: TreeNode[] = [];
   if (block.children) {
     for (const child of block.children) {
-      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, enabledProperties);
       if (node) children.push(node);
     }
   }
@@ -341,7 +371,8 @@ export async function buildTree(
   fetcher: RefFetcher = async () => null,
   idResolver: IdResolver = async () => null,
   tagProvider?: TagProvider,
-  pageUuid?: string
+  pageUuid?: string,
+  enabledProperties: Set<string> = new Set()
 ): Promise<TreeNode> {
   nextId = 0;
   const cache = new Map<string, string>();
@@ -359,7 +390,7 @@ export async function buildTree(
   }
   const children: TreeNode[] = [];
   for (const block of blocks) {
-    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, enabledProperties);
     if (node) children.push(node);
   }
   if (children.length === 1 && children[0].name) {
@@ -435,13 +466,13 @@ const defaultFetcher: RefFetcher = async (uuid) => {
   return null;
 };
 
-export async function fetchTree(showEmpty: boolean): Promise<TreeNode | null> {
+export async function fetchTree(showEmpty: boolean, enabledProperties: Set<string> = new Set()): Promise<TreeNode | null> {
   const page = await logseq.Editor.getCurrentPage();
   if (!page) return null;
   const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
   const blocks = await logseq.Editor.getPageBlocksTree(pageName);
   if (!blocks || blocks.length === 0) return null;
-  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, undefined, (page as any).uuid);
+  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, undefined, (page as any).uuid, enabledProperties);
 }
 
 export async function fetchBlockTree(
@@ -449,7 +480,8 @@ export async function fetchBlockTree(
   showEmpty: boolean,
   fetcher: RefFetcher = defaultFetcher,
   idResolver: IdResolver = defaultIdResolver,
-  tagProvider?: TagProvider
+  tagProvider?: TagProvider,
+  enabledProperties: Set<string> = new Set()
 ): Promise<TreeNode | null> {
   const block = await logseq.Editor.getBlock(uuid, { includeChildren: true });
   if (!block) return null;
@@ -457,7 +489,7 @@ export async function fetchBlockTree(
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
   if (!tagProvider) tagProvider = new DefaultTagProvider(new Map([[block.uuid, block as any]]));
-  return await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+  return await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, enabledProperties);
 }
 
 export function filterIntraTreeRefs(root: TreeNode): TreeNode {
@@ -470,4 +502,84 @@ export function filterIntraTreeRefs(root: TreeNode): TreeNode {
     const refs = n.refs?.filter((r) => present.has(r.targetUuid));
     return { ...n, children: n.children.map(walk), refs: refs && refs.length ? refs : [] };
   })(root);
+}
+
+/**
+ * Scan for references to nodes outside the current tree and add them as a virtual branch.
+ */
+export async function includeOutScopeRefs(
+  root: TreeNode,
+  showEmpty: boolean,
+  fetcher: RefFetcher = defaultFetcher,
+  idResolver: IdResolver = defaultIdResolver,
+  tagProvider?: TagProvider,
+  enabledProperties: Set<string> = new Set()
+): Promise<TreeNode> {
+  const present = new Set<string>();
+  (function collect(n: TreeNode): void {
+    if (n.uuid) present.add(n.uuid);
+    for (const c of n.children) collect(c);
+  })(root);
+
+  const outScopeUuids = new Set<string>();
+  (function findOutScope(n: TreeNode): void {
+    if (n.refs) {
+      for (const ref of n.refs) {
+        if (ref.targetUuid && !present.has(ref.targetUuid)) {
+          outScopeUuids.add(ref.targetUuid);
+        }
+      }
+    }
+    for (const c of n.children) findOutScope(c);
+  })(root);
+
+  if (outScopeUuids.size === 0) return root;
+
+  const virtualRoot: TreeNode = {
+    name: "Out of Scope References",
+    children: [],
+    depth: 1,
+    id: nextId++,
+    uuid: "virtual-out-scope-root",
+    tags: [],
+    refs: [],
+    properties: []
+  };
+
+  const idCache = new Map<number, string | null>();
+  const cache = new Map<string, string>();
+  if (!tagProvider) tagProvider = new DefaultTagProvider();
+
+  for (const uuid of outScopeUuids) {
+    const block = await logseq.Editor.getBlock(uuid);
+    if (block) {
+       const node = await convertBlock(block as unknown as LogseqBlock, 2, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, enabledProperties);
+       if (node) {
+         node.depth = 2;
+         virtualRoot.children.push(node);
+       }
+    } else {
+       const page = await logseq.Editor.getPage(uuid);
+       if (page) {
+         const name = (page as any).originalName ?? (page as any).name ?? (page as any).title ?? uuid;
+         const tags = await tagProvider.getTags(uuid);
+         virtualRoot.children.push({
+           name,
+           children: [],
+           depth: 2,
+           id: nextId++,
+           uuid,
+           tags: [...tags],
+           refs: [],
+           properties: []
+         });
+       }
+    }
+  }
+
+  if (virtualRoot.children.length > 0) {
+    root.children.push(virtualRoot);
+  }
+
+  return root;
 }

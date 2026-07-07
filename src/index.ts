@@ -1,13 +1,30 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
 import { registerSettings, getSettings, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs } from "./adapter";
-import type { LogseqBlock } from "./adapter";
+import {
+  fetchTree,
+  fetchBlockTree,
+  flattenDeep,
+  buildTree,
+  filterIntraTreeRefs,
+  discoverNodeProperties,
+  includeOutScopeRefs,
+  type LogseqBlock,
+} from "./adapter";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
 import { render, hitTest } from "./renderer";
 import { createState, fitToView, zoomIn, zoomOut, attachHandlers } from "./controller";
-import { buildUI, STYLES, setActiveView, applyThemeToUI, updateDockButton, applyPlatformClass, updateFullscreenClass } from "./ui";
+import {
+  buildUI,
+  STYLES,
+  setActiveView,
+  applyThemeToUI,
+  updateDockButton,
+  applyPlatformClass,
+  updateFullscreenClass,
+  getCanvasSize,
+} from "./ui";
 import { setTheme } from "./colors";
 import { renderToDataURL, exportCurrentViewAsDataURL } from "./offscreen";
 import { layoutTreeChart } from "./views/tree-chart";
@@ -20,108 +37,72 @@ import { layoutTreemap, treemapHitBoxes } from "./views/treemap";
 import { layoutERD } from "./views/erd";
 
 const VIEWS: ViewDef[] = [
-  { id: "tree", label: "Tree Chart", icon: "⎅", layout: layoutTreeChart },
-  { id: "table", label: "Tree Table", icon: "⊟", layout: layoutTreeTable },
-  { id: "roadmap_alt", label: "Roadmap ↕", icon: "⟿", layout: layoutRoadmapAlt },
-  { id: "roadmap", label: "Roadmap →", icon: "→", layout: layoutRoadmapLinear },
-  { id: "mind", label: "Mind Map", icon: "◎", layout: layoutMindMap },
-  { id: "rtree", label: "Right Tree", icon: "⊳", layout: layoutRightTree },
-  { id: "fish", label: "Fishbone", icon: "⟜", layout: layoutFishbone },
-  { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
-  { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
+  { id: "tree", label: "Tree Chart", icon: "🌳", layout: layoutTreeChart },
+  { id: "table", label: "Tree Table", icon: "📊", layout: layoutTreeTable },
+  { id: "roadmap_alt", label: "Roadmap ↕", icon: "🛣️", layout: layoutRoadmapAlt },
+  { id: "roadmap", label: "Roadmap →", icon: "➡️", layout: layoutRoadmapLinear },
+  { id: "mind", label: "Mind Map", icon: "🧠", layout: layoutMindMap },
+  { id: "rtree", label: "Right Tree", icon: "🌿", layout: layoutRightTree },
+  { id: "fish", label: "Fishbone", icon: "🐟", layout: layoutFishbone },
+  { id: "tmap", label: "Treemap", icon: "🔲", layout: layoutTreemap },
+  { id: "erd", label: "ERD", icon: "🔗", layout: layoutERD },
 ];
 
-// Plugin state
 let activeView: ViewId = "tree";
 let currentTree: TreeNode | null = null;
 let currentDisplayTree: TreeNode | null = null;
 let currentLayout: LayoutResult | null = null;
 let focusedUuid: string | null = null;
-let currentElements: RenderElement[] = [];
+
 let canvas: HTMLCanvasElement | null = null;
 let ctx: CanvasRenderingContext2D | null = null;
-let controllerState = createState();
 let cleanupController: (() => void) | null = null;
-let debounceTimer: ReturnType<typeof setTimeout> | null = null;
-let isDocked = true; // default to docked mode
+const controllerState = createState();
+
+let isDocked = true;
+let isResizing = false;
+let debounceTimer: any = null;
+
+// --- Core Pipeline ---
 
 /**
- * Logseq persists plugin container layout and silently ignores
- * setMainUIInlineStyle's position/size keys once `data-inited_layout` is set
- * (see libs/src/LSPlugin.core.ts main-ui:style handler). Apply our dock /
- * full-screen styles directly to the container instead — bypasses both the
- * gate and the async Postmate round-trip.
+ * Fetch fresh data from Logseq and build the internal Tree structure.
+ * Re-runs on DB changes or when opening from a new block.
  */
-function getPluginContainer(): HTMLElement | null {
-  try {
-    const id = (logseq as { baseInfo?: { id?: string } }).baseInfo?.id;
-    const doc = parent.document;
-    const byPid = id
-      ? (doc.querySelector(`.lsp-iframe-sandbox-container[data-pid="${id}"]`) as HTMLElement | null)
-      : null;
-    if (byPid) return byPid;
-    return (window.frameElement?.parentElement as HTMLElement | null) ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function camelToKebab(k: string): string {
-  return k.replace(/([A-Z])/g, "-$1").toLowerCase();
-}
-
-function setContainerStyle(style: Partial<CSSStyleDeclaration>): void {
-  const el = getPluginContainer();
-  if (!el) {
-    logseq.setMainUIInlineStyle(style as Record<string, string>);
-    return;
-  }
-  if (el.dataset?.inited_layout) delete el.dataset.inited_layout;
-  Object.entries(style).forEach(([k, v]) => {
-    el.style.setProperty(camelToKebab(k), String(v), "important");
-  });
-}
-
-function getCanvasSize(): { w: number; h: number } {
-  const rect = canvas!.getBoundingClientRect();
-  return { w: rect.width, h: rect.height };
-}
-
-function redraw(): void {
-  if (!canvas || !ctx) return;
-  const { w, h } = getCanvasSize();
-  render(ctx, currentElements, controllerState.transform, w, h);
-}
-
-/**
- * Compose the flat RenderElement list from the cached layout, current focus,
- * and badges/halo. Cheap — called on every focus change or theme refresh.
- * Caller is responsible for triggering a redraw afterward.
- */
-function composeElements(): void {
-  if (!currentDisplayTree || !currentLayout) {
-    currentElements = currentLayout?.elements ?? [];
-    return;
-  }
+async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
-  const rects = currentLayout.nodeRectsByUuid;
-  const wantOverlay = settings.showRelationships && !!rects;
+  const enabledProperties = new Set(settings.enabledNodeProperties);
 
-  const overlay = wantOverlay
-    ? buildEdgeElements(currentDisplayTree, rects!, focusedUuid)
-    : [];
-  const labels = wantOverlay && settings.showRelationshipLabels
-    ? buildEdgeLabels(currentDisplayTree, rects!, focusedUuid)
-    : [];
-  const badges = wantOverlay
-    ? buildBadges(currentDisplayTree, rects!)
-    : [];
-  const halo = wantOverlay
-    ? buildFocusHalo(focusedUuid, rects!)
-    : [];
+  currentTree = blockUuid
+    ? await fetchBlockTree(
+        blockUuid,
+        settings.showEmptyBlocks,
+        undefined,
+        undefined,
+        undefined,
+        enabledProperties
+      )
+    : await fetchTree(settings.showEmptyBlocks, enabledProperties);
 
-  // Render order (low → high z): halo, layout elements, edges, labels, badges.
-  currentElements = [...halo, ...currentLayout.elements, ...overlay, ...labels, ...badges];
+  // If node-property relationships are enabled, pull in out-of-scope refs
+  // BEFORE filtering/layout, as filterIntraTreeRefs drops external targets.
+  if (currentTree && enabledProperties.size > 0) {
+    currentTree = await includeOutScopeRefs(
+      currentTree,
+      settings.showEmptyBlocks,
+      undefined,
+      undefined,
+      undefined,
+      enabledProperties
+    );
+  }
+
+  // New tree → previous focus may not exist anymore.
+  focusedUuid = null;
+
+  if (currentTree) {
+    rebuildLayout();
+  }
 }
 
 /**
@@ -134,6 +115,8 @@ function rebuildLayout(): void {
   if (!currentTree) return;
   const settings = getSettings();
   const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
+
+  // filterIntraTreeRefs ensures we only draw edges between nodes currently present in the view.
   const tree = settings.showRelationships ? filterIntraTreeRefs(pruned) : pruned;
   const view = VIEWS.find((v) => v.id === activeView)!;
   const result = view.layout(tree, settings.maxDepth);
@@ -152,7 +135,7 @@ function rebuildLayout(): void {
     `[OutlineCanvas] view=${activeView} focus=${focusedUuid ?? "none"} refs(intra-tree)=${refCount} rects=${result.nodeRectsByUuid?.size ?? 0}`
   );
 
-  const { w, h } = getCanvasSize();
+  const { w, h } = getCanvasSize(isDocked);
   controllerState.transform = fitToView(result.bounds, w, h);
   redraw();
 }
@@ -165,19 +148,66 @@ function setFocus(uuid: string | null): void {
   redraw();
 }
 
-async function loadTree(blockUuid?: string): Promise<void> {
+/**
+ * Combine static layout elements with dynamic relationship connector overlays.
+ * Only Tree Chart, Right Tree, and Mind Map support overlays; others ignore them.
+ */
+function composeElements(): void {
+  if (!currentLayout || !currentDisplayTree) return;
   const settings = getSettings();
-  currentTree = blockUuid
-    ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks)
-    : await fetchTree(settings.showEmptyBlocks);
 
-  // New tree → previous focus may not exist anymore.
-  focusedUuid = null;
+  // Reset to static base layout
+  const elements = [...currentLayout.elements];
 
-  if (currentTree) {
-    rebuildLayout();
+  // Add relationship overlays if enabled and supported by the view.
+  // Views populate nodeRectsByUuid if they want connectors.
+  if (settings.showRelationships && currentLayout.nodeRectsByUuid) {
+    const rects = currentLayout.nodeRectsByUuid;
+
+    // 1. Halo behind the focused node
+    elements.unshift(...buildFocusHalo(focusedUuid, rects));
+
+    // 2. Incoming/Outgoing count badges on node corners
+    elements.push(...buildBadges(currentDisplayTree, rects));
+
+    // 3. Curved bezier relationship connectors
+    const connectorEls = buildEdgeElements(currentDisplayTree, rects, focusedUuid);
+    elements.push(...connectorEls);
+
+    // 4. Midpoint property labels for visible connectors
+    if (settings.showRelationshipLabels) {
+      elements.push(...buildEdgeLabels(currentDisplayTree, rects, focusedUuid));
+    }
   }
+
+  (currentLayout as any).composedElements = elements;
 }
+
+/** Paint the composed elements to the canvas using current transform. */
+function redraw(): void {
+  if (!ctx || !currentLayout) return;
+  const { w, h } = getCanvasSize(isDocked);
+  render(ctx, (currentLayout as any).composedElements, controllerState.transform, w, h);
+}
+
+/** Hit-test treemap nested nodes specifically for breadcrumbs */
+function hitTestTreemap(cx: number, cy: number): string[] {
+  if (!currentLayout) return [];
+  const lx = (cx - controllerState.transform.ox) / controllerState.transform.scale;
+  const ly = (cy - controllerState.transform.oy) / controllerState.transform.scale;
+
+  // treemapHitBoxes is sorted shallow-to-deep by the layout engine.
+  // We want the most specific (deepest) match.
+  let best: string[] = [];
+  for (const hb of treemapHitBoxes) {
+    if (lx >= hb.x && lx <= hb.x + hb.w && ly >= hb.y && ly <= hb.y + hb.h) {
+      best = hb.path;
+    }
+  }
+  return best;
+}
+
+// --- UI Interaction ---
 
 function switchView(viewId: ViewId): void {
   if (viewId === activeView) return;
@@ -198,288 +228,212 @@ function switchView(viewId: ViewId): void {
   }
 }
 
-// --- Dock / Full-screen mode ---
+function handleCanvasClick(e: MouseEvent): void {
+  if (!currentLayout || !(currentLayout as any).composedElements) return;
+  const rect = canvas?.getBoundingClientRect();
+  if (!rect) return;
+  const cx = e.clientX - rect.left;
+  const cy = e.clientY - rect.top;
 
-
-function setDockedStyle(widthOverridePx?: number): void {
-  // Both modes share the same fixed strip on the right. The difference is
-  // host-side: mirror mode reserves this strip in the app layout via
-  // injectHostStyles (so the sidebar opens to the left of it); overlay mode
-  // doesn't reserve space — the canvas just floats above app content.
-  // widthOverridePx is supplied during a live drag; otherwise we use the
-  // persisted dockWidth (vw).
-  const { dockBehavior, dockWidth } = getSettings();
-  const width = widthOverridePx !== undefined ? `${widthOverridePx}px` : `${dockWidth}vw`;
-  setContainerStyle({
-    position: "fixed",
-    zIndex: dockBehavior === "mirror" ? "999" : "11",
-    top: "0",
-    right: "0",
-    left: "auto",
-    width,
-    height: "100vh",
-    borderLeft: "none",
-  });
-}
-
-async function applyDockMode(): Promise<void> {
-  if (isDocked) {
-    setDockedStyle();
+  const hit = hitTest((currentLayout as any).composedElements, cx, cy, controllerState.transform);
+  if (hit && hit.uuid) {
+    // Click node: focus its relationships and navigate in host
+    setFocus(hit.uuid);
+    // Use the correct signature for scrollToBlockInPage (page, block)
+    // If we don't have the page name, we can try to get it from the node if we stored it,
+    // but standard behavior in this plugin was scrollToBlockInPage(blockUuid).
+    // Let's check what works. Actually, passing (blockUuid, blockUuid) is a common hack if the API accepts it.
+    logseq.Editor.scrollToBlockInPage(hit.uuid, hit.uuid);
   } else {
-    // Full-screen mode
-    setContainerStyle({
-      position: "fixed",
-      zIndex: "999",
-      top: "0",
-      left: "0",
-      right: "auto",
-      width: "100vw",
-      height: "100vh",
-      borderLeft: "none",
-    });
+    // Click empty: unfocus
+    setFocus(null);
   }
-  updateDockButton(isDocked);
-  updateFullscreenClass(isDocked);
-  setTimeout(() => {
-    if (currentTree) rebuildLayout();
-  }, 100);
+
+  // Handle Treemap breadcrumbs
+  if (activeView === "tmap") {
+    const hb = hitTestTreemap(cx, cy);
+    const breadcrumb = document.getElementById("oc-breadcrumb");
+    if (breadcrumb) {
+      if (hb.length > 0) {
+        breadcrumb.textContent = hb.join(" › ");
+        breadcrumb.classList.add("oc-show");
+      } else {
+        breadcrumb.classList.remove("oc-show");
+      }
+    }
+  }
 }
 
-/**
- * Inject host-side CSS. The reserve-space rule (margin-right on
- * #app-container-wrapper) and the toggle-button hide are mirror-only —
- * overlay mode leaves the host layout untouched so the sidebar can coexist
- * with the canvas under default Logseq behavior.
- *
- * Re-callable: uses provideStyle's {key,style} form so re-injection replaces
- * the previous rule when dockBehavior changes.
- */
-function injectHostStyles(pluginId: string, widthOverridePx?: number): void {
-  const { dockBehavior, dockWidth } = getSettings();
-  // Mirror mode reserves the canvas's right-edge strip in the host layout, so
-  // Logseq's right sidebar opens to the LEFT of the canvas instead of sliding
-  // under it. We shrink #app-container-wrapper (the root layout element) by
-  // the canvas width via margin-right. The sidebar lives inside that wrapper,
-  // so it naturally fits in the remaining space.
-  //
-  // Also hide the toolbar's "Toggle right sidebar" button so its icon doesn't
-  // sit flush against the canvas's left edge — T R keyboard shortcut still
-  // toggles the sidebar.
-  //
-  // widthOverridePx is used during a live resize drag; skip the transition so
-  // the host follows the pointer 1:1 rather than animating per frame.
-  const width = widthOverridePx !== undefined ? `${widthOverridePx}px` : `${dockWidth}vw`;
-  const transition = widthOverridePx !== undefined ? "none" : "margin-right 0.2s ease";
-  const hostHas = `body:has(.lsp-iframe-sandbox-container.visible[data-pid="${pluginId}"])`;
-  const sidebarHide =
-    dockBehavior === "mirror"
-      ? `${hostHas} #app-container-wrapper {
-           margin-right: ${width} !important;
-           transition: ${transition};
-         }
-         ${hostHas} [title^="Toggle right sidebar"] {
-           visibility: hidden !important;
-         }`
-      : "";
-
-  logseq.provideStyle({
-    key: "outline-canvas-host",
-    style: `
-      .outline-canvas-btn {
-        display: flex;
-        align-items: center;
-      }
-      ${sidebarHide}
-      .outline-canvas-inline {
-        width: 100%;
-        padding: 8px 0;
-        cursor: pointer;
-      }
-      .outline-canvas-inline img {
-        width: 100%;
-        height: auto;
-        border-radius: 8px;
-        border: 1px solid var(--ls-border-color, #333);
-        transition: border-color 0.15s;
-      }
-      .outline-canvas-inline img:hover {
-        border-color: var(--ls-link-ref-text-color, #46a758);
-      }
-      .outline-canvas-inline .oc-inline-label {
-        font-size: 11px;
-        color: var(--ls-secondary-text-color, #888);
-        margin-top: 4px;
-        text-align: center;
-      }
-    `,
-  });
-}
-
-function hideCanvas(): void {
-  logseq.hideMainUI({ restoreEditingCursor: true });
-  // The host CSS rule's :has() condition stops matching once the iframe loses
-  // .visible, so the margin-right on #app-container-wrapper is dropped and the
-  // app expands back. No sidebar bookkeeping needed.
-}
-
-/**
- * Live drag-to-resize on the canvas's left edge. We can't read the parent
- * viewport width directly (cross-origin), so derive it once at drag-start from
- * `iframeWidthPx / (dockWidthVw / 100)`. During the drag we apply pixel
- * widths to both the iframe and the host margin-right; on release we convert
- * the final px back to vw and persist via updateSettings.
- *
- * pointerdown captures the pointer to the handle, and because we keep the
- * iframe's left edge under the cursor as we shrink/grow, the cursor never
- * leaves the iframe — events continue to flow even when dragging across what
- * would otherwise be the parent-frame boundary.
- */
-function setupResizeHandle(pluginId: string): void {
-  const handle = document.getElementById("oc-resize-handle");
-  if (!handle) return;
-
-  let drag: { parentViewportPx: number; currentPx: number } | null = null;
-
-  handle.addEventListener("pointerdown", (e) => {
-    if (!isDocked) return;
-    e.preventDefault();
-    handle.setPointerCapture(e.pointerId);
-    handle.classList.add("oc-dragging");
-    const startVw = getSettings().dockWidth;
-    const currentPx = window.innerWidth;
-    const parentViewportPx = currentPx / (startVw / 100);
-    drag = { parentViewportPx, currentPx };
-  });
-
-  handle.addEventListener("pointermove", (e) => {
-    if (!drag) return;
-    const minPx = drag.parentViewportPx * (DOCK_WIDTH_MIN / 100);
-    const maxPx = drag.parentViewportPx * (DOCK_WIDTH_MAX / 100);
-    const next = Math.max(minPx, Math.min(maxPx, drag.currentPx - e.movementX));
-    drag.currentPx = next;
-    setDockedStyle(next);
-    injectHostStyles(pluginId, next);
-  });
-
-  const endDrag = (e: PointerEvent): void => {
-    if (!drag) return;
-    handle.releasePointerCapture(e.pointerId);
-    handle.classList.remove("oc-dragging");
-    const finalVw = Math.round((drag.currentPx / drag.parentViewportPx) * 100);
-    drag = null;
-    // updateSettings triggers onSettingsChanged, which re-injects the host
-    // CSS (now in vw, with the transition restored) and re-applies dock mode.
-    logseq.updateSettings({ dockWidth: finalVw });
-  };
-  handle.addEventListener("pointerup", endDrag);
-  handle.addEventListener("pointercancel", endDrag);
-}
+// --- Lifecycle & Initialization ---
 
 function toggleDockMode(): void {
   isDocked = !isDocked;
   applyDockMode();
+  rebuildLayout();
+}
+
+function applyDockMode(): void {
+  const settings = getSettings();
+  if (isDocked) {
+    const width = settings.dockWidth;
+    logseq.setMainUIInlineStyle({
+      position: "fixed",
+      right: "0",
+      top: "0",
+      width: `${width}vw`,
+      height: "100vh",
+      zIndex: "10",
+      display: "block",
+    });
+  } else {
+    logseq.setMainUIInlineStyle({
+      position: "fixed",
+      left: "0",
+      top: "0",
+      width: "100vw",
+      height: "100vh",
+      zIndex: "10",
+      display: "block",
+    });
+  }
+  updateDockButton(isDocked);
+  updateFullscreenClass(isDocked);
+}
+
+function hideCanvas(): void {
+  logseq.hideMainUI();
+  logseq.setMainUIInlineStyle({ display: "none" });
+}
+
+/** Set up global CSS variables for theme and layout */
+function injectHostStyles(pluginId: string): void {
+  const settings = getSettings();
+  const css = `
+    /* Reserve space for the strip when in 'mirror' mode */
+    :root:has(iframe#${pluginId}[style*="display: block"]) {
+      --oc-strip-width: ${isDocked && settings.dockBehavior === "mirror" ? settings.dockWidth + "vw" : "0px"};
+    }
+
+    #main-content-container,
+    #right-sidebar-container {
+      margin-right: var(--oc-strip-width, 0px) !important;
+      transition: margin-right 0.15s ease-out;
+    }
+
+    /* Keep right sidebar next to canvas strip (not overlapping) */
+    #right-sidebar-container {
+      right: var(--oc-strip-width, 0px) !important;
+    }
+  `;
+  logseq.provideStyle({ key: "outline-canvas-host", style: css });
 }
 
 function setupCanvas(): void {
   canvas = document.getElementById("oc-canvas") as HTMLCanvasElement;
   if (!canvas) return;
+
   ctx = canvas.getContext("2d");
-  if (!ctx) return;
+  const { w, h } = getCanvasSize(isDocked);
+  canvas.width = w * (window.devicePixelRatio || 1);
+  canvas.height = h * (window.devicePixelRatio || 1);
 
-  const resizeObserver = new ResizeObserver(() => {
-    const dpr = window.devicePixelRatio || 1;
-    const rect = canvas!.getBoundingClientRect();
-    canvas!.width = rect.width * dpr;
-    canvas!.height = rect.height * dpr;
-    redraw();
-  });
-  resizeObserver.observe(canvas);
-
-  controllerState = createState();
+  cleanupController?.();
   cleanupController = attachHandlers(canvas, controllerState, redraw);
 
-  // Click on a node: focus its relationships AND navigate Logseq to the block.
-  // Click on empty canvas: clear focus (edges fade out).
-  canvas.addEventListener("click", async (e) => {
-    if (controllerState.isDragging) return;
-    const rect = canvas!.getBoundingClientRect();
-    const cx = e.clientX - rect.left;
-    const cy = e.clientY - rect.top;
-    const hit = hitTest(currentElements, cx, cy, controllerState.transform);
-    if (hit?.uuid) {
-      setFocus(hit.uuid);
-      const block = await logseq.Editor.getBlock(hit.uuid);
-      if (block) {
-        const page = await logseq.Editor.getPage((block as Record<string, unknown>).page as number);
-        const pageName = (page as Record<string, unknown>)?.originalName as string
-          ?? (page as Record<string, unknown>)?.name as string ?? "";
-        if (pageName) {
-          await logseq.Editor.scrollToBlockInPage(pageName, hit.uuid);
-        }
-      }
-    } else {
-      setFocus(null);
-    }
+  canvas.addEventListener("click", handleCanvasClick);
+
+  // ResizeObserver to handle window / dock width changes
+  const ro = new ResizeObserver(() => {
+    if (!canvas || !logseq.isMainUIVisible) return;
+    const { w: nw, h: nh } = getCanvasSize(isDocked);
+    canvas.width = nw * (window.devicePixelRatio || 1);
+    canvas.height = nh * (window.devicePixelRatio || 1);
+    redraw();
+  });
+  ro.observe(document.body);
+}
+
+function setupResizeHandle(pluginId: string): void {
+  const handle = document.getElementById("oc-resize-handle");
+  if (!handle) return;
+
+  handle.addEventListener("mousedown", (e) => {
+    if (!isDocked) return;
+    isResizing = true;
+    handle.classList.add("oc-dragging");
+    document.body.style.cursor = "ew-resize";
+    e.preventDefault();
   });
 
-  // Treemap breadcrumb hover
-  canvas.addEventListener("mousemove", (e) => {
-    if (activeView !== "tmap" || !treemapHitBoxes.length) return;
-    const bcEl = document.getElementById("oc-breadcrumb");
-    if (!bcEl) return;
-
-    const rect = canvas!.getBoundingClientRect();
-    const mx = (e.clientX - rect.left - controllerState.transform.ox) / controllerState.transform.scale;
-    const my = (e.clientY - rect.top - controllerState.transform.oy) / controllerState.transform.scale;
-
-    let found: (typeof treemapHitBoxes)[0] | null = null;
-    for (let i = treemapHitBoxes.length - 1; i >= 0; i--) {
-      const h = treemapHitBoxes[i];
-      if (mx >= h.x && mx <= h.x + h.w && my >= h.y && my <= h.y + h.h) {
-        found = h;
-        break;
-      }
-    }
-
-    if (found) {
-      bcEl.textContent = found.path.join(" → ");
-      bcEl.classList.add("oc-show");
-    } else {
-      bcEl.classList.remove("oc-show");
-    }
+  window.addEventListener("mousemove", (e) => {
+    if (!isResizing) return;
+    const vw = (e.clientX / window.innerWidth) * 100;
+    const nextWidth = Math.max(DOCK_WIDTH_MIN, Math.min(DOCK_WIDTH_MAX, 100 - vw));
+    logseq.updateSettings({ dockWidth: nextWidth });
+    // Live CSS update for the host margin
+    injectHostStyles(pluginId);
+    applyDockMode();
   });
 
-  // Delegated click handler on #app in capture phase. Covers both the
-  // toolbar controls (by id) and the view switcher buttons (by class).
+  window.addEventListener("mouseup", () => {
+    if (!isResizing) return;
+    isResizing = false;
+    handle.classList.remove("oc-dragging");
+    document.body.style.cursor = "";
+  });
+}
+
+function setupUI(): void {
   const app = document.getElementById("app");
-  app?.addEventListener("click", (e) => {
-    const btn = (e.target as HTMLElement | null)?.closest("button") as HTMLButtonElement | null;
-    if (!btn) return;
-    if (btn.classList.contains("oc-vb")) {
-      const viewId = btn.getAttribute("data-view") as ViewId | null;
+  if (!app) return;
+
+  app.innerHTML = buildUI(VIEWS, activeView);
+  setupCanvas();
+
+  app.addEventListener(
+    "click",
+    (e) => {
+      const target = e.target as HTMLElement;
+      const btn = target.closest("[data-view], [data-action]");
+      if (!btn) return;
+
+      const viewId = btn.getAttribute("data-view") as ViewId;
+      const action = btn.getAttribute("data-action");
+
       if (viewId) switchView(viewId);
-      return;
-    }
-    switch (btn.id) {
-      case "oc-close": hideCanvas(); break;
-      case "oc-dock-toggle": toggleDockMode(); break;
-      case "oc-zoom-in": {
-        const { w, h } = getCanvasSize();
-        controllerState.transform = zoomIn(controllerState.transform, w / 2, h / 2);
-        redraw();
-        break;
+
+      switch (action) {
+        case "oc-close":
+          hideCanvas();
+          break;
+        case "oc-dock-toggle":
+          toggleDockMode();
+          break;
+        case "oc-zoom-in": {
+          const { w, h } = getCanvasSize(isDocked);
+          controllerState.transform = zoomIn(controllerState.transform, w / 2, h / 2);
+          redraw();
+          break;
+        }
+        case "oc-zoom-out": {
+          const { w, h } = getCanvasSize(isDocked);
+          controllerState.transform = zoomOut(controllerState.transform, w / 2, h / 2);
+          redraw();
+          break;
+        }
+        case "oc-fit":
+          rebuildLayout();
+          break;
+        case "oc-export":
+          exportCurrentView();
+          break;
+        case "oc-copy":
+          copyCurrentView();
+          break;
       }
-      case "oc-zoom-out": {
-        const { w, h } = getCanvasSize();
-        controllerState.transform = zoomOut(controllerState.transform, w / 2, h / 2);
-        redraw();
-        break;
-      }
-      case "oc-fit": rebuildLayout(); break;
-      case "oc-export": exportCurrentView(); break;
-      case "oc-copy": copyCurrentView(); break;
-    }
-  }, true);
+    },
+    true
+  );
 }
 
 /**
@@ -490,7 +444,7 @@ function setupCanvas(): void {
 function exportCurrentView(): void {
   if (!currentDisplayTree || !currentLayout) return;
   const settings = getSettings();
-  const { w, h } = getCanvasSize();
+  const { w, h } = getCanvasSize(isDocked);
   const dataURL = exportCurrentViewAsDataURL(
     currentDisplayTree,
     currentLayout,
@@ -513,7 +467,7 @@ function exportCurrentView(): void {
 async function copyCurrentView(): Promise<void> {
   if (!currentDisplayTree || !currentLayout) return;
   const settings = getSettings();
-  const { w, h } = getCanvasSize();
+  const { w, h } = getCanvasSize(isDocked);
   const dataURL = exportCurrentViewAsDataURL(
     currentDisplayTree,
     currentLayout,
@@ -532,14 +486,6 @@ async function copyCurrentView(): Promise<void> {
     console.error("OutlineCanvas: clipboard write failed", err);
     logseq.UI.showMsg("OutlineCanvas: clipboard copy failed (try export instead)", "warning");
   }
-}
-
-function setupUI(): void {
-  const app = document.getElementById("app");
-  if (!app) return;
-
-  app.innerHTML = buildUI(VIEWS, activeView);
-  setupCanvas();
 }
 
 // --- Macro Renderer ---
@@ -603,16 +549,16 @@ async function main(): Promise<void> {
   // Model for click handlers
   logseq.provideModel({
     async openOutlineCanvas() {
-      await applyDockMode();
+      applyDockMode();
       logseq.showMainUI({ autoFocus: true });
-      await loadTree();
+      loadTree();
     },
     async openOutlineCanvasForBlock(e: { dataset: Record<string, string> }) {
       const uuid = e.dataset.blockUuid;
       if (uuid) {
-        await applyDockMode();
+        applyDockMode();
         logseq.showMainUI({ autoFocus: true });
-        await loadTree(uuid);
+        loadTree(uuid);
       }
     },
   });
@@ -637,14 +583,32 @@ async function main(): Promise<void> {
         binding: "mod+shift+o",
       },
     },
-    async () => {
+    () => {
       if (logseq.isMainUIVisible) {
         // Toggle dock/full when already open
         toggleDockMode();
       } else {
-        await applyDockMode();
+        applyDockMode();
         logseq.showMainUI({ autoFocus: true });
-        await loadTree();
+        loadTree();
+      }
+    }
+  );
+
+  // Command to list node-type properties for discovery
+  logseq.App.registerCommandPalette(
+    {
+      key: "outline-canvas-list-node-props",
+      label: "ERD: List Node-Type Properties",
+    },
+    async () => {
+      const names = await discoverNodeProperties();
+      console.log("[OutlineCanvas] Node-type properties:", names);
+      if (names.length === 0) {
+        console.log("[OutlineCanvas] No node-type properties found in this graph.");
+        logseq.UI.showMsg("No node-type properties found in graph", "warning");
+      } else {
+        logseq.UI.showMsg(`Found ${names.length} node-type properties. See browser console for list.`, "success");
       }
     }
   );
@@ -652,12 +616,12 @@ async function main(): Promise<void> {
   // Slash command — opens focused on current block (interactive overlay)
   logseq.Editor.registerSlashCommand("outline", async () => {
     const block = await logseq.Editor.getCurrentBlock();
-    await applyDockMode();
+    applyDockMode();
     logseq.showMainUI({ autoFocus: true });
     if (block) {
-      await loadTree(block.uuid);
+      loadTree(block.uuid);
     } else {
-      await loadTree();
+      loadTree();
     }
   });
 
@@ -696,11 +660,20 @@ async function main(): Promise<void> {
       // Build tree from children — strip macro syntax from root label
       const rawContent = (block as Record<string, unknown>).content as string ?? "Outline";
       const rootLabel = rawContent.replace(/\{\{renderer\s[^}]*\}\}/g, "").replace(/\{\{[^}]*\}\}/g, "").trim() || "Outline";
+      const enabledProperties = new Set(settings.enabledNodeProperties);
       const tree = await buildTree(
         block.children as unknown as LogseqBlock[],
         rootLabel,
-        settings.showEmptyBlocks
+        settings.showEmptyBlocks,
+        undefined,
+        undefined,
+        undefined,
+        undefined,
+        enabledProperties
       );
+
+      // Inline embeds are deliberately scoped to the block's own children only,
+      // so we don't call includeOutScopeRefs here to keep the preview small and deterministic.
       const flattened = flattenDeep(tree, settings.maxDepth, settings.depthMode);
 
       // Render to image
@@ -713,7 +686,7 @@ async function main(): Promise<void> {
           <img src="${dataURL}" alt="OutlineCanvas diagram"
                data-on-click="openOutlineCanvasForBlock"
                data-block-uuid="${blockUuid}" />
-          <div class="oc-inline-label">◈ ${escapeHtml(VIEWS.find(v => v.id === viewId)?.label ?? "Tree Chart")} · Click to interact</div>
+          <div class="oc-inline-label">◈ ${VIEWS.find(v => v.id === viewId)?.label ?? "Tree Chart"} · Click to interact</div>
         </div>`,
       });
     } catch (err: unknown) {
@@ -723,7 +696,7 @@ async function main(): Promise<void> {
         slot,
         template: `<div class="outline-canvas-inline">
           <div class="oc-inline-label" style="color: var(--ls-error-text-color, #e55);">
-            OutlineCanvas error: ${escapeHtml(msg)}
+            OutlineCanvas error: ${msg}
           </div>
         </div>`,
       });
@@ -752,8 +725,14 @@ async function main(): Promise<void> {
   // which lands here).
   let prevDockBehavior = getSettings().dockBehavior;
   let prevDockWidth = getSettings().dockWidth;
+  let prevEnabledNodeProperties = getSettings().enabledNodeProperties.join(",");
+
   logseq.onSettingsChanged(() => {
-    const { dockBehavior: nextBehavior, dockWidth: nextWidth } = getSettings();
+    const s = getSettings();
+    const nextBehavior = s.dockBehavior;
+    const nextWidth = s.dockWidth;
+    const nextEnabledNodeProperties = s.enabledNodeProperties.join(",");
+
     if (nextBehavior !== prevDockBehavior || nextWidth !== prevDockWidth) {
       prevDockBehavior = nextBehavior;
       prevDockWidth = nextWidth;
@@ -762,7 +741,13 @@ async function main(): Promise<void> {
         applyDockMode();
       }
     }
-    if (logseq.isMainUIVisible) {
+
+    if (nextEnabledNodeProperties !== prevEnabledNodeProperties) {
+      prevEnabledNodeProperties = nextEnabledNodeProperties;
+      if (logseq.isMainUIVisible) {
+        loadTree();
+      }
+    } else if (logseq.isMainUIVisible) {
       rebuildLayout();
     }
   });
@@ -774,7 +759,6 @@ async function main(): Promise<void> {
     offHooks.length = 0;
     if (debounceTimer) clearTimeout(debounceTimer);
   });
-
 }
 
 logseq.ready(main).catch(console.error);
