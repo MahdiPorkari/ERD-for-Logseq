@@ -1,5 +1,5 @@
 /** Kinds of cross-hierarchy relationships rendered as connectors */
-export type RelKind = string; // "relates_to" | "depends_on" or any custom property name
+export type RelKind = "relates_to" | "depends_on";
 
 /** An outgoing relationship edge declared on a block */
 export interface NodeRef {

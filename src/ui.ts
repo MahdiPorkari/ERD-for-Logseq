@@ -1,6 +1,5 @@
 import type { ViewId, ViewDef } from "./types";
 import { theme } from "./colors";
-import { getSettings } from "./settings";
 
 // Tabler Icons (https://tabler-icons.io) — same library Logseq uses, so the
 // plugin's iconography matches the host UI. Inlined here because the plugin
@@ -309,12 +308,4 @@ export function applyPlatformClass(): void {
 /** Toggle the fullscreen class so platform-specific CSS (traffic-light padding) kicks in. */
 export function updateFullscreenClass(isDocked: boolean): void {
   document.documentElement.classList.toggle("oc-fullscreen", !isDocked);
-}
-
-/** Calculate the logical width and height of the canvas viewport */
-export function getCanvasSize(isDocked: boolean): { w: number; h: number } {
-  const settings = getSettings();
-  const w = isDocked ? (window.innerWidth * settings.dockWidth) / 100 : window.innerWidth;
-  const h = window.innerHeight;
-  return { w, h };
 }
