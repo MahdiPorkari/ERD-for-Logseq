@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties } from "./adapter";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, includeOutScopeRefs, extractRefs } from "./adapter";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
@@ -275,5 +275,68 @@ describe("buildTree with pageUuid (bug fix)", () => {
     expect(tree.name).toBe("My Page");
     expect(tree.uuid).toBe("");
     expect(tree.tags).toHaveLength(0);
+  });
+});
+
+describe("extractRefs with custom properties", () => {
+  it("extracts refs from enabled custom properties", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      "user.property/custom-prop": "[[target-uuid]]",
+      properties: {
+        "custom-prop": "[[target-uuid]]"
+      }
+    };
+    const idCache = new Map();
+    const idResolver = vi.fn();
+    const enabledProperties = new Set(["custom-prop"]);
+
+    // UUID_RE in adapter.ts is REAL_UUID_RE now.
+    // Let's use a real-looking UUID for target.
+    const targetUuid = "33333333-3333-3333-3333-333333333333";
+    block["user.property/custom-prop"] = targetUuid;
+
+    const refs = await (extractRefs as any)(block, idCache, idResolver, enabledProperties);
+    expect(refs).toHaveLength(1);
+    expect(refs[0].kind).toBe("custom-prop");
+    expect(refs[0].targetUuid).toBe(targetUuid);
+  });
+});
+
+describe("includeOutScopeRefs", () => {
+  it("adds out-of-scope nodes to a virtual branch", async () => {
+    const targetUuid = "44444444-4444-4444-4444-444444444444";
+    const root: any = {
+      uuid: "root",
+      name: "Root",
+      children: [
+        {
+          uuid: "child",
+          name: "Child",
+          children: [],
+          refs: [{ kind: "custom-prop", targetUuid }]
+        }
+      ],
+      refs: []
+    };
+
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getBlock: vi.fn().mockImplementation((uuid) => {
+          if (uuid === targetUuid) return Promise.resolve({ uuid: targetUuid, content: "External Block" });
+          return Promise.resolve(null);
+        }),
+        getPage: vi.fn().mockResolvedValue(null)
+      },
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([])
+      }
+    });
+
+    const result = await includeOutScopeRefs(root, false);
+    expect(result.children).toHaveLength(2);
+    expect(result.children[1].name).toBe("Out of Scope References");
+    expect(result.children[1].children).toHaveLength(1);
+    expect(result.children[1].children[0].uuid).toBe(targetUuid);
   });
 });
