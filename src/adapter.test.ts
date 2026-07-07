@@ -200,3 +200,55 @@ describe("DefaultTagProvider edge cases", () => {
     expect(titles).toContain("PrefixedTag");
   });
 });
+
+describe("buildTree with pageUuid (bug fix)", () => {
+  it("populates tags for synthetic root node when pageUuid is provided", async () => {
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockImplementation((query, uuid) => {
+           if (uuid === '#uuid "page-123"') return Promise.resolve([[{ ":block/uuid": "t-page", ":block/title": "PageTag" }]]);
+           return Promise.resolve([]);
+        })
+      },
+      Editor: {
+        getBlock: vi.fn().mockResolvedValue(null)
+      }
+    });
+
+    const blocks: LogseqBlock[] = [
+      { uuid: "b1", content: "B1" },
+      { uuid: "b2", content: "B2" }
+    ];
+
+    // Call with pageUuid
+    const tree = await (buildTree as any)(blocks, "My Page", false, undefined, undefined, undefined, "page-123");
+
+    expect(tree.name).toBe("My Page");
+    expect(tree.uuid).toBe("page-123");
+    expect(tree.tags).toBeDefined();
+    expect(tree.tags).toHaveLength(1);
+    expect(tree.tags![0].title).toBe("PageTag");
+  });
+
+  it("leaves root tags empty and uuid blank when pageUuid is omitted (backward compatibility)", async () => {
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([])
+      },
+      Editor: {
+        getBlock: vi.fn().mockResolvedValue(null)
+      }
+    });
+
+    const blocks: LogseqBlock[] = [
+      { uuid: "b1", content: "B1" },
+      { uuid: "b2", content: "B2" }
+    ];
+
+    const tree = await buildTree(blocks, "My Page", false);
+
+    expect(tree.name).toBe("My Page");
+    expect(tree.uuid).toBe("");
+    expect(tree.tags).toHaveLength(0);
+  });
+});

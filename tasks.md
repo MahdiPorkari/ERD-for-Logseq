@@ -268,6 +268,7 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 
 
 ### Feature: ERD Tags (target v1.4.0)
+- [ ] Fix page-level root tag population in `buildTree()`
 **Refinement (Badge Chips)**
 - [x] `TagInfo` and `TagProvider` interfaces in `src/adapter.ts`
 - [x] Implement `defaultTagProvider` using primary/secondary/fallback order

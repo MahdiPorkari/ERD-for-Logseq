@@ -341,7 +341,8 @@ export async function buildTree(
   showEmpty: boolean,
   fetcher: RefFetcher = async () => null,
   idResolver: IdResolver = async () => null,
-  tagProvider?: TagProvider
+  tagProvider?: TagProvider,
+  pageUuid?: string
 ): Promise<TreeNode> {
   nextId = 0;
   const cache = new Map<string, string>();
@@ -366,7 +367,8 @@ export async function buildTree(
     children[0].depth = 0;
     return reindex(children[0], 0);
   }
-  return { name: pageName, children, depth: 0, id: nextId++, uuid: "", tags: [], refs: [] };
+  const rootTags = pageUuid ? await tagProvider.getTags(pageUuid) : [];
+  return { name: pageName, children, depth: 0, id: nextId++, uuid: pageUuid || "", tags: [...rootTags], refs: [] };
 }
 
 function reindex(node: TreeNode, depth: number): TreeNode {
@@ -440,7 +442,7 @@ export async function fetchTree(showEmpty: boolean): Promise<TreeNode | null> {
   const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
   const blocks = await logseq.Editor.getPageBlocksTree(pageName);
   if (!blocks || blocks.length === 0) return null;
-  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver);
+  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, undefined, (page as any).uuid);
 }
 
 export async function fetchBlockTree(

@@ -38,3 +38,7 @@ In the **ERD view ONLY**, block tags should be visible at the top of the entity 
 - No tags in other views.
 - No hashtag parsing from text.
 - No hard-coded design language (reuse theme tokens).
+
+## 6. Page-Level Root Tags (Bug Fix)
+- **Problem**: When a page has multiple top-level blocks, `buildTree()` creates a synthetic root node with an empty UUID and empty tags. The ERD view thus shows "Tags: N/A" for the page node even if the page has tags.
+- **Fix**: pass the page's UUID into `buildTree()`. The synthetic root node will now use this UUID and call the `TagProvider` to fetch page-level tags (classes).
