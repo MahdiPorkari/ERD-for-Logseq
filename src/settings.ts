@@ -13,6 +13,7 @@ export interface PluginSettings {
   showRelationshipLabels: boolean;
   dockBehavior: DockBehavior;
   dockWidth: number;
+  enabledNodeProperties: string[];
 }
 
 export const DOCK_WIDTH_MIN = 20;
@@ -28,6 +29,7 @@ export const DEFAULTS: PluginSettings = {
   showRelationshipLabels: false,
   dockBehavior: "mirror",
   dockWidth: 40,
+  enabledNodeProperties: [],
 };
 
 export function registerSettings(): void {
@@ -92,6 +94,18 @@ export function registerSettings(): void {
         "Draw lines between blocks that reference each other via 'relates_to' or 'depends_on' node properties (Tree Chart, Right Tree, Mind Map only).",
     },
     {
+      key: "enabledNodeProperties",
+      type: "string",
+      default: "",
+      title: "Node-Type Relationship Properties",
+      description:
+        "Comma-separated list of custom property names (type: 'node') whose " +
+        "values should be drawn as relationship connectors, in addition to " +
+        "'relates_to' / 'depends_on'. Open the browser console and run the " +
+        "'ERD: List Node-Type Properties' command from the command palette " +
+        "to see which property names are available to enter here.",
+    },
+    {
       key: "showRelationshipLabels",
       type: "boolean",
       default: DEFAULTS.showRelationshipLabels,
@@ -146,5 +160,11 @@ export function getSettings(): PluginSettings {
         (logseq.settings?.dockWidth as number) ?? DEFAULTS.dockWidth
       )
     ),
+    enabledNodeProperties: (
+      (logseq.settings?.enabledNodeProperties as string) ?? ""
+    )
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean),
   };
 }
