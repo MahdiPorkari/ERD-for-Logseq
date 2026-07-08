@@ -1,7 +1,7 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
-import { registerSettings, getSettings, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs } from "./adapter";
+import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
@@ -105,16 +105,26 @@ function composeElements(): void {
   }
   const settings = getSettings();
   const rects = currentLayout.nodeRectsByUuid;
-  const wantOverlay = settings.showRelationships && !!rects;
+  const additionalSelected = getSelectedAdditionalRelationshipProperties();
+  const allowedKinds = new Set<string>();
+  if (settings.showRelationships) {
+    allowedKinds.add("relates_to");
+    allowedKinds.add("depends_on");
+  }
+  if (activeView === "erd" && settings.showRelationships) {
+    for (const name of additionalSelected) allowedKinds.add(name);
+  }
+  const wantOverlay = allowedKinds.size > 0 && !!rects;
+  const overlayTree = wantOverlay ? filterRefsByKind(currentDisplayTree, allowedKinds as Set<any>) : currentDisplayTree;
 
   const overlay = wantOverlay
-    ? buildEdgeElements(currentDisplayTree, rects!, focusedUuid)
+    ? buildEdgeElements(overlayTree, rects!, focusedUuid)
     : [];
   const labels = wantOverlay && settings.showRelationshipLabels
-    ? buildEdgeLabels(currentDisplayTree, rects!, focusedUuid)
+    ? buildEdgeLabels(overlayTree, rects!, focusedUuid)
     : [];
   const badges = wantOverlay
-    ? buildBadges(currentDisplayTree, rects!)
+    ? buildBadges(overlayTree, rects!)
     : [];
   const halo = wantOverlay
     ? buildFocusHalo(focusedUuid, rects!)
@@ -168,8 +178,8 @@ function setFocus(uuid: string | null): void {
 async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
   currentTree = blockUuid
-    ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks)
-    : await fetchTree(settings.showEmptyBlocks);
+    ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, getSelectedAdditionalRelationshipProperties())
+    : await fetchTree(settings.showEmptyBlocks, getSelectedAdditionalRelationshipProperties());
 
   // New tree → previous focus may not exist anymore.
   focusedUuid = null;
