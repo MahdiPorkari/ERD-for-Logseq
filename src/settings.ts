@@ -240,7 +240,7 @@ export function getSettings(): PluginSettings {
 }
 
 export function getSelectedAdditionalRelationshipProperties(): string[] {
-  const settings = logseq.settings || {};
+  const settings = (logseq.settings || {}) as Record<string, any>;
   return Object.keys(settings)
     .filter((key) => key.startsWith(RELPROP_PREFIX) && settings[key] === true)
     .map((key) => key.slice(RELPROP_PREFIX.length));
