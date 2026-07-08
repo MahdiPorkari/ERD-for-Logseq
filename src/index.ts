@@ -556,7 +556,7 @@ async function main(): Promise<void> {
   const offHooks: Array<() => void> = [];
 
   // Settings
-  registerSettings();
+  await registerSettings();
   activeView = getSettings().defaultView;
 
   // Detect initial theme
