@@ -217,17 +217,40 @@ async function extractRefUuids(
   return [];
 }
 
+
+function matchAdditionalRelKey(key: string, selected: string[]): string | null {
+  if (selected.length === 0) return null;
+  const map = new Map<string, string>();
+  for (const s of selected) {
+    const norm = s.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+    map.set(norm, s);
+  }
+  const m = USER_PROP_RE.exec(key);
+  if (!m) return null;
+  let rawName = m[1];
+  const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
+  if (suffixMatch) rawName = suffixMatch[1];
+  const normKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+  return map.get(normKey) || null;
+}
+
 async function extractRefs(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
-  idResolver: IdResolver
+  idResolver: IdResolver,
+  additionalRelKeys: string[] = []
 ): Promise<{ kind: RelKind; targetUuid: string }[]> {
   const out: { kind: RelKind; targetUuid: string }[] = [];
   const seen = new Set<string>();
   const addFrom = async (key: string, value: unknown): Promise<void> => {
     const m = REL_KEY_RE.exec(key);
-    if (!m) return;
-    const kind = m[1] as RelKind;
+    let kind: RelKind | null = null;
+    if (m) {
+      kind = m[1] as RelKind;
+    } else {
+      kind = matchAdditionalRelKey(key, additionalRelKeys);
+    }
+    if (!kind) return;
     const uuids = await extractRefUuids(value, idCache, idResolver);
     for (const targetUuid of uuids) {
       const sig = `${kind}|${targetUuid}`;
@@ -315,7 +338,8 @@ async function convertBlock(
   cache: Map<string, string>,
   idResolver: IdResolver,
   idCache: Map<number, string | null>,
-  tagProvider: TagProvider
+  tagProvider: TagProvider,
+  additionalRelKeys: string[] = []
 ): Promise<TreeNode | null> {
   const rawText = block.content ?? block.title ?? (block as any)[":block/title"] ?? "";
   const resolved = await resolveNodeRefs(rawText, fetcher, cache);
@@ -323,11 +347,11 @@ async function convertBlock(
   if (!name && (!block.children || block.children.length === 0) && !showEmpty) return null;
   const properties = await extractDisplayProperties(block, idCache, idResolver, fetcher);
   const tags = await tagProvider.getTags(block.uuid);
-  const refs = await extractRefs(block, idCache, idResolver);
+  const refs = await extractRefs(block, idCache, idResolver, additionalRelKeys);
   const children: TreeNode[] = [];
   if (block.children) {
     for (const child of block.children) {
-      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+      const node = await convertBlock(child, depth + 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, additionalRelKeys);
       if (node) children.push(node);
     }
   }
@@ -341,7 +365,8 @@ export async function buildTree(
   fetcher: RefFetcher = async () => null,
   idResolver: IdResolver = async () => null,
   tagProvider?: TagProvider,
-  pageUuid?: string
+  pageUuid?: string,
+  additionalRelKeys: string[] = []
 ): Promise<TreeNode> {
   nextId = 0;
   const cache = new Map<string, string>();
@@ -359,7 +384,7 @@ export async function buildTree(
   }
   const children: TreeNode[] = [];
   for (const block of blocks) {
-    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+    const node = await convertBlock(block, 1, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, additionalRelKeys);
     if (node) children.push(node);
   }
   if (children.length === 1 && children[0].name) {
@@ -435,13 +460,13 @@ const defaultFetcher: RefFetcher = async (uuid) => {
   return null;
 };
 
-export async function fetchTree(showEmpty: boolean): Promise<TreeNode | null> {
+export async function fetchTree(showEmpty: boolean, additionalRelKeys: string[] = []): Promise<TreeNode | null> {
   const page = await logseq.Editor.getCurrentPage();
   if (!page) return null;
   const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
   const blocks = await logseq.Editor.getPageBlocksTree(pageName);
   if (!blocks || blocks.length === 0) return null;
-  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, undefined, (page as any).uuid);
+  return buildTree(blocks as unknown as LogseqBlock[], pageName, showEmpty, defaultFetcher, defaultIdResolver, undefined, (page as any).uuid, additionalRelKeys);
 }
 
 export async function fetchBlockTree(
@@ -449,7 +474,8 @@ export async function fetchBlockTree(
   showEmpty: boolean,
   fetcher: RefFetcher = defaultFetcher,
   idResolver: IdResolver = defaultIdResolver,
-  tagProvider?: TagProvider
+  tagProvider?: TagProvider,
+  additionalRelKeys: string[] = []
 ): Promise<TreeNode | null> {
   const block = await logseq.Editor.getBlock(uuid, { includeChildren: true });
   if (!block) return null;
@@ -457,7 +483,7 @@ export async function fetchBlockTree(
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
   if (!tagProvider) tagProvider = new DefaultTagProvider(new Map([[block.uuid, block as any]]));
-  return await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, fetcher, cache, idResolver, idCache, tagProvider);
+  return await convertBlock(block as unknown as LogseqBlock, 0, showEmpty, fetcher, cache, idResolver, idCache, tagProvider, additionalRelKeys);
 }
 
 export function filterIntraTreeRefs(root: TreeNode): TreeNode {
@@ -468,6 +494,13 @@ export function filterIntraTreeRefs(root: TreeNode): TreeNode {
   })(root);
   return (function walk(n: TreeNode): TreeNode {
     const refs = n.refs?.filter((r) => present.has(r.targetUuid));
+    return { ...n, children: n.children.map(walk), refs: refs && refs.length ? refs : [] };
+  })(root);
+}
+
+export function filterRefsByKind(root: TreeNode, allowedKinds: Set<RelKind>): TreeNode {
+  return (function walk(n: TreeNode): TreeNode {
+    const refs = n.refs?.filter((r) => allowedKinds.has(r.kind));
     return { ...n, children: n.children.map(walk), refs: refs && refs.length ? refs : [] };
   })(root);
 }

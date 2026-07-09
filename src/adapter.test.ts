@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties } from "./adapter";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties , filterRefsByKind } from "./adapter";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
@@ -275,5 +275,31 @@ describe("buildTree with pageUuid (bug fix)", () => {
     expect(tree.name).toBe("My Page");
     expect(tree.uuid).toBe("");
     expect(tree.tags).toHaveLength(0);
+  });
+});
+
+describe("filterRefsByKind", () => {
+  it("filters refs by allowed kinds recursively", () => {
+    const tree: any = {
+      uuid: "root",
+      children: [
+        {
+          uuid: "c1",
+          children: [],
+          refs: [
+            { kind: "relates_to", targetUuid: "t1" },
+            { kind: "custom", targetUuid: "t2" }
+          ]
+        }
+      ],
+      refs: [
+        { kind: "depends_on", targetUuid: "t3" }
+      ]
+    };
+    const filtered = filterRefsByKind(tree, new Set(["relates_to", "depends_on"]));
+    expect(filtered.refs).toHaveLength(1);
+    expect(filtered.refs![0].kind).toBe("depends_on");
+    expect(filtered.children[0].refs).toHaveLength(1);
+    expect(filtered.children[0].refs![0].kind).toBe("relates_to");
   });
 });

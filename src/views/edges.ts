@@ -135,6 +135,8 @@ export function buildEdgeElements(
           }
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
+
+
           els.push(makeEdge(source, target, ref.kind));
         }
       }
@@ -170,6 +172,8 @@ export function buildEdgeLabels(
           }
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
+
+          if (ref.kind !== "relates_to" && ref.kind !== "depends_on") continue;
 
           const g = pickEdgeGeometry(source, target);
           const mid = bezierMidpoint(g);

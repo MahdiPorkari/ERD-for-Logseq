@@ -10,6 +10,19 @@ const curveEls = (els: ReturnType<typeof buildEdgeElements>): CurveElement[] =>
   els.filter((e): e is CurveElement => e.type === "curve");
 
 describe("buildEdgeElements", () => {
+
+  it("renders custom relationship kind with relates_to style (dashed, no arrow)", () => {
+    const tree = node("A", [], [{ kind: "CustomKind", targetUuid: "B" } as any]);
+    const rects = new Map<string, Rect>([
+      ["A", { x: 0, y: 0, w: 100, h: 40 }],
+      ["B", { x: 200, y: 0, w: 100, h: 40 }],
+    ]);
+    const curves = curveEls(buildEdgeElements(tree, rects));
+    expect(curves).toHaveLength(1);
+    expect(curves[0].arrowEnd).toBeFalsy();
+    expect(curves[0].dash).toBeDefined();
+  });
+
   it("returns no elements when there are no refs", () => {
     const tree = node("A", [node("B")]);
     const rects = new Map<string, Rect>([
@@ -172,6 +185,23 @@ describe("buildEdgeElements", () => {
 });
 
 describe("buildEdgeLabels", () => {
+
+  it("excludes labels for custom relationship kinds", () => {
+    const tree = node("A", [], [
+      { kind: "relates_to", targetUuid: "B" } as any,
+      { kind: "CustomKind", targetUuid: "C" } as any
+    ]);
+    const rects = new Map<string, Rect>([
+      ["A", { x: 0, y: 0, w: 100, h: 40 }],
+      ["B", { x: 200, y: 0, w: 100, h: 40 }],
+      ["C", { x: 0, y: 200, w: 100, h: 40 }],
+    ]);
+    const labels = buildEdgeLabels(tree, rects);
+    // Only one text + one box for relates_to
+    expect(labels.filter(l => l.type === "text")).toHaveLength(1);
+    expect((labels.find(l => l.type === "text") as any).text).toBe("relates_to");
+  });
+
   const tree: TreeNode = {
     name: "A", uuid: "A", depth: 0, id: 0,
     children: [
