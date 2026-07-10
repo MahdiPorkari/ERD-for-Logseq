@@ -158,7 +158,7 @@ Pre-v1.1.0-release sweep. `npm audit` clean (overrides from v1.0.0 hold); typech
 - [x] Verified no currently-tracked files would be retroactively ignored by the new patterns
 
 **Deferred (B — see "Refactor: Split src/index.ts" below)**
-- [ ] `src/index.ts` decomposition into `dock-mode.ts` / `macro.ts` / `interaction.ts` — own commit, not in v1.1.0
+- [ ] `src/index.ts` decomposition into `dock-mode.ts` / `macro-renderer.ts` / `event-wiring.ts`. Not urgent; pick up in a focused session.
 
 ### Feature: Node Relationship Connectors (target v1.1.0, completed 2026-05-16)
 Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties (DB type `:node`). Full spec in `docs/feature-node-relationship-connectors.md`.
@@ -290,6 +290,16 @@ Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concer
 - [x] Layout centered all-caps tags at the top of the entity box
 - [x] Reuse `truncateWithEllipsis` for tag row
 - [x] Updated `src/views/erd.test.ts` covering tag row growth and rendering
+
+
+### Feature: ERD Out-of-Scope References (Single-hop External References)
+- [ ] TDD Checklist for expandOutOfScopeRefs:
+  - [ ] A ref whose target is out-of-tree and whose kind is allowed → gets injected as a child, with correct name/tags/properties, and the ref is removed from the source node.
+  - [ ] A ref whose kind is NOT in `allowedKinds` → untouched (no injection, ref stays).
+  - [ ] A ref whose target IS already in-tree → untouched (no duplicate injection; this case is handled elsewhere by the existing overlay pipeline).
+  - [ ] Two different properties on the same node pointing at the same external target → only one synthetic child injected.
+  - [ ] blockFetcher returning null for a target → ref is dropped, no crash, no synthetic node.
+  - [ ] Injected node has empty `children` even if the real block has children.
 
 
 ### Feature: Visual Validation

@@ -1,6 +1,7 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties , filterRefsByKind } from "./adapter";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, expandOutOfScopeRefs } from "./adapter";
+import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
@@ -301,5 +302,279 @@ describe("filterRefsByKind", () => {
     expect(filtered.refs![0].kind).toBe("depends_on");
     expect(filtered.children[0].refs).toHaveLength(1);
     expect(filtered.children[0].refs![0].kind).toBe("relates_to");
+  });
+});
+
+describe("expandOutOfScopeRefs", () => {
+  const fetcher = vi.fn(async () => null);
+  const idResolver = vi.fn(async () => null);
+  const tagProvider = {
+    getTags: vi.fn(async () => [])
+  };
+
+  it("injects an out-of-tree allowed ref as a child, and removes the ref from source node", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_custom", targetUuid: "out-uuid-1" }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === "out-uuid-1") {
+        return {
+          uuid: "out-uuid-1",
+          content: "External Block Content",
+          "user.property/custom_prop": "custom-val"
+        };
+      }
+      return null;
+    });
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(1);
+    const syntheticChild = sourceNode.children[0];
+    expect(syntheticChild.uuid).toBe("out-uuid-1");
+    expect(syntheticChild.name).toBe("External Block Content");
+    expect(syntheticChild.children).toHaveLength(0);
+    expect(syntheticChild.properties).toEqual([{ name: "Custom Prop", value: "custom-val" }]);
+    expect(sourceNode.refs).toHaveLength(0); // reference is removed
+  });
+
+  it("does not inject refs whose kind is NOT in allowedKinds, and keeps the ref", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_unallowed", targetUuid: "out-uuid-2" }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async () => null);
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(0);
+    expect(sourceNode.refs).toHaveLength(1);
+    expect(sourceNode.refs![0].kind).toBe("rel_unallowed");
+  });
+
+  it("does not inject refs whose target is already present in-tree", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_custom", targetUuid: "in-uuid-2" }
+          ]
+        },
+        {
+          name: "In Tree Target",
+          depth: 1,
+          id: 2,
+          uuid: "in-uuid-2",
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async () => null);
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(0);
+    expect(sourceNode.refs).toHaveLength(1); // keeps the ref for overlay edges
+  });
+
+  it("only injects a single synthetic child when same node references same target multiple times", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_custom1", targetUuid: "out-uuid-3" },
+            { kind: "rel_custom2", targetUuid: "out-uuid-3" }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === "out-uuid-3") {
+        return {
+          uuid: "out-uuid-3",
+          content: "External Block 3"
+        };
+      }
+      return null;
+    });
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom1", "rel_custom2"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(1); // only one synthetic child is injected
+    expect(sourceNode.children[0].uuid).toBe("out-uuid-3");
+    expect(sourceNode.refs).toHaveLength(0); // both references are removed
+  });
+
+  it("drops the ref, does not crash and does not inject when blockFetcher returns null", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_custom", targetUuid: "non-existent" }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async () => null);
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(0);
+    expect(sourceNode.refs).toHaveLength(0); // dropped
+  });
+
+  it("forces children: [] on synthetic child even if the real block has children", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Source Block",
+          depth: 1,
+          id: 1,
+          uuid: "source-uuid",
+          children: [],
+          refs: [
+            { kind: "rel_custom", targetUuid: "out-uuid-4" }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === "out-uuid-4") {
+        return {
+          uuid: "out-uuid-4",
+          content: "External with Children",
+          children: [
+            { uuid: "nested-child-uuid", content: "Nested Child" }
+          ]
+        };
+      }
+      return null;
+    });
+
+    const result = await expandOutOfScopeRefs(
+      root,
+      ["rel_custom"],
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher
+    );
+
+    const sourceNode = result.children[0];
+    expect(sourceNode.children).toHaveLength(1);
+    expect(sourceNode.children[0].children).toHaveLength(0); // strictly empty!
   });
 });

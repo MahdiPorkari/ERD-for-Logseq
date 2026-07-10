@@ -504,3 +504,78 @@ export function filterRefsByKind(root: TreeNode, allowedKinds: Set<RelKind>): Tr
     return { ...n, children: n.children.map(walk), refs: refs && refs.length ? refs : [] };
   })(root);
 }
+
+export async function expandOutOfScopeRefs(
+  root: TreeNode,
+  allowedKinds: string[],
+  fetcher: RefFetcher,
+  idResolver: IdResolver,
+  tagProvider: TagProvider,
+  blockFetcher: (uuid: string) => Promise<LogseqBlock | null>
+): Promise<TreeNode> {
+  const present = new Set<string>();
+  (function collect(n: TreeNode): void {
+    if (n.uuid) present.add(n.uuid);
+    for (const c of n.children) collect(c);
+  })(root);
+
+  const cloned = structuredClone(root);
+  const cache = new Map<string, string>();
+  const idCache = new Map<number, string | null>();
+  let localNextId = 1000000 + Math.floor(Math.random() * 1000000);
+
+  async function walk(node: TreeNode): Promise<void> {
+    for (const child of node.children) {
+      await walk(child);
+    }
+
+    if (!node.refs || node.refs.length === 0) return;
+
+    const syntheticChildren: TreeNode[] = [];
+    const newRefs: NodeRef[] = [];
+    const seenTargetsForThisNode = new Set<string>();
+
+    for (const ref of node.refs) {
+      const isAllowed = allowedKinds.includes(ref.kind);
+      const isOutOfTree = !present.has(ref.targetUuid);
+
+      if (isAllowed && isOutOfTree) {
+        if (!seenTargetsForThisNode.has(ref.targetUuid)) {
+          seenTargetsForThisNode.add(ref.targetUuid);
+          try {
+            const targetBlock = await blockFetcher(ref.targetUuid);
+            if (targetBlock) {
+              const rawText = targetBlock.content ?? targetBlock.title ?? (targetBlock as any)[":block/title"] ?? "";
+              const resolved = await resolveNodeRefs(rawText, fetcher, cache);
+              const name = stripMarkdown(resolved) || "(empty)";
+              const tags = await tagProvider.getTags(targetBlock.uuid);
+              const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
+
+              const syntheticNode: TreeNode = {
+                name,
+                children: [],
+                depth: node.depth + 1,
+                id: localNextId++,
+                uuid: targetBlock.uuid,
+                properties,
+                tags: [...tags],
+                refs: []
+              };
+              syntheticChildren.push(syntheticNode);
+            }
+          } catch (err) {
+            console.error("expandOutOfScopeRefs: failed to fetch block", ref.targetUuid, err);
+          }
+        }
+      } else {
+        newRefs.push(ref);
+      }
+    }
+
+    node.children.push(...syntheticChildren);
+    node.refs = newRefs;
+  }
+
+  await walk(cloned);
+  return cloned;
+}

@@ -1,7 +1,7 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
 import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind } from "./adapter";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
@@ -140,11 +140,58 @@ function composeElements(): void {
  * view changes, or settings change — NOT on focus changes (those use
  * composeElements() to avoid resetting the user's pan/zoom state).
  */
-function rebuildLayout(): void {
+async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
   const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
-  const tree = settings.showRelationships ? filterIntraTreeRefs(pruned) : pruned;
+
+  let tree = pruned;
+  if (activeView === "erd" && settings.showRelationships) {
+    const defaultIdResolver = async (id: number) => {
+      try {
+        const b = await logseq.Editor.getBlock(id);
+        return b?.uuid || null;
+      } catch { return null; }
+    };
+    const defaultFetcher = async (uuid: string) => {
+      try {
+        const block = await logseq.Editor.getBlock(uuid);
+        if (block) {
+          const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
+          if (t && t.trim()) return t;
+        }
+      } catch { }
+      try {
+        const page = await logseq.Editor.getPage(uuid);
+        if (page) {
+          const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
+          if (t && t.trim()) return t;
+        }
+      } catch { }
+      return null;
+    };
+    const blockFetcher = async (uuid: string) => {
+      try {
+        const block = await logseq.Editor.getBlock(uuid);
+        return block as any;
+      } catch { return null; }
+    };
+    const tagProvider = new DefaultTagProvider();
+
+    tree = await expandOutOfScopeRefs(
+      pruned,
+      getSelectedAdditionalRelationshipProperties(),
+      defaultFetcher,
+      defaultIdResolver,
+      tagProvider,
+      blockFetcher
+    );
+  }
+
+  if (settings.showRelationships) {
+    tree = filterIntraTreeRefs(tree);
+  }
+
   const view = VIEWS.find((v) => v.id === activeView)!;
   const result = view.layout(tree, settings.maxDepth);
 
@@ -185,11 +232,11 @@ async function loadTree(blockUuid?: string): Promise<void> {
   focusedUuid = null;
 
   if (currentTree) {
-    rebuildLayout();
+    await rebuildLayout();
   }
 }
 
-function switchView(viewId: ViewId): void {
+async function switchView(viewId: ViewId): Promise<void> {
   if (viewId === activeView) return;
   activeView = viewId;
 
@@ -199,17 +246,16 @@ function switchView(viewId: ViewId): void {
   const settings = getSettings();
   if (canvas && settings.animateViewSwitch) {
     canvas.classList.add("oc-fading");
-    setTimeout(() => {
-      rebuildLayout();
+    setTimeout(async () => {
+      await rebuildLayout();
       canvas?.classList.remove("oc-fading");
     }, 180);
   } else {
-    rebuildLayout();
+    await rebuildLayout();
   }
 }
 
 // --- Dock / Full-screen mode ---
-
 
 function setDockedStyle(widthOverridePx?: number): void {
   // Both modes share the same fixed strip on the right. The difference is
@@ -250,8 +296,8 @@ async function applyDockMode(): Promise<void> {
   }
   updateDockButton(isDocked);
   updateFullscreenClass(isDocked);
-  setTimeout(() => {
-    if (currentTree) rebuildLayout();
+  setTimeout(async () => {
+    if (currentTree) await rebuildLayout();
   }, 100);
 }
 
@@ -462,12 +508,12 @@ function setupCanvas(): void {
   // Delegated click handler on #app in capture phase. Covers both the
   // toolbar controls (by id) and the view switcher buttons (by class).
   const app = document.getElementById("app");
-  app?.addEventListener("click", (e) => {
+  app?.addEventListener("click", async (e) => {
     const btn = (e.target as HTMLElement | null)?.closest("button") as HTMLButtonElement | null;
     if (!btn) return;
     if (btn.classList.contains("oc-vb")) {
       const viewId = btn.getAttribute("data-view") as ViewId | null;
-      if (viewId) switchView(viewId);
+      if (viewId) await switchView(viewId);
       return;
     }
     switch (btn.id) {
@@ -485,7 +531,7 @@ function setupCanvas(): void {
         redraw();
         break;
       }
-      case "oc-fit": rebuildLayout(); break;
+      case "oc-fit": await rebuildLayout(); break;
       case "oc-export": exportCurrentView(); break;
       case "oc-copy": copyCurrentView(); break;
     }
@@ -579,11 +625,11 @@ async function main(): Promise<void> {
   }
 
   // Listen for theme changes
-  const offTheme = logseq.App.onThemeModeChanged(({ mode }) => {
+  const offTheme = logseq.App.onThemeModeChanged(async ({ mode }) => {
     setTheme(mode === "light" ? "light" : "dark");
     applyThemeToUI();
     if (logseq.isMainUIVisible) {
-      rebuildLayout();
+      await rebuildLayout();
     }
   });
   if (typeof offTheme === "function") offHooks.push(offTheme);
@@ -762,18 +808,18 @@ async function main(): Promise<void> {
   // which lands here).
   let prevDockBehavior = getSettings().dockBehavior;
   let prevDockWidth = getSettings().dockWidth;
-  logseq.onSettingsChanged(() => {
+  logseq.onSettingsChanged(async () => {
     const { dockBehavior: nextBehavior, dockWidth: nextWidth } = getSettings();
     if (nextBehavior !== prevDockBehavior || nextWidth !== prevDockWidth) {
       prevDockBehavior = nextBehavior;
       prevDockWidth = nextWidth;
       injectHostStyles(pluginId);
       if (logseq.isMainUIVisible && isDocked) {
-        applyDockMode();
+        await applyDockMode();
       }
     }
     if (logseq.isMainUIVisible) {
-      rebuildLayout();
+      await rebuildLayout();
     }
   });
 
