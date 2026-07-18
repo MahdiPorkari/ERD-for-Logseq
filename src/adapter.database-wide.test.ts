@@ -445,4 +445,155 @@ describe("Database-wide Discovery Tests", () => {
     expect(node2.children).toHaveLength(1);
     expect(node2.children[0].uuid).toBe(UUID_B);
   });
+
+  // 7. Handles various entity reference shapes (db/id, block/uuid, plain UUID)
+  it("generic discovery: handles various entity reference shapes (db/id, block/uuid, plain UUID)", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: [] // empty, relies on blockFetcher generic extraction!
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          ":user.property/ref-db-id": { "db/id": 42 },
+          ":user.property/ref-block-uuid": { "block/uuid": UUID_C },
+          ":user.property/ref-plain-uuid": UUID_D
+        };
+      }
+      if (uuid === UUID_B) return { uuid: UUID_B, content: "Block B" };
+      if (uuid === UUID_C) return { uuid: UUID_C, content: "Block C" };
+      if (uuid === UUID_D) return { uuid: UUID_D, content: "Block D" };
+      return null;
+    });
+
+    const mockIdResolver = vi.fn(async (id: number) => {
+      if (id === 42) return UUID_B;
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      mockIdResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    // Block A should have discovered B, C, and D!
+    expect(nodeA.children).toHaveLength(3);
+    const discoveredUuids = nodeA.children.map(c => c.uuid);
+    expect(discoveredUuids).toContain(UUID_B);
+    expect(discoveredUuids).toContain(UUID_C);
+    expect(discoveredUuids).toContain(UUID_D);
+  });
+
+  // 8. Plain non-reference values are not treated as traversable
+  it("generic discovery: plain non-reference values are not treated as traversable", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          ":user.property/text-prop": "Just some plain text value",
+          ":user.property/num-prop": 12345,
+          ":user.property/bool-prop": true
+        };
+      }
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    expect(nodeA.children).toHaveLength(0); // traversal ends naturally
+  });
+
+  // 9. Internal/system properties and tags are excluded from traversal
+  it("generic discovery: internal/system properties and tags are excluded from traversal", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          // Internal/system properties
+          ":block/tags": { "block/uuid": UUID_B },
+          ":logseq.property/created-at": { "block/uuid": UUID_C },
+          ":db/id": 999,
+          // user.property/tags specifically excluded
+          ":user.property/tags": UUID_D
+        };
+      }
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    expect(nodeA.children).toHaveLength(0); // none should be traversed
+  });
 });
