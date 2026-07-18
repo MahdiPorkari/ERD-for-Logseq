@@ -191,27 +191,41 @@ export async function resolveNodeRefs(
 async function extractRefUuids(
   value: unknown,
   idCache: Map<number, string | null>,
-  idResolver: IdResolver
+  idResolver: IdResolver,
+  keyContext?: string
 ): Promise<string[]> {
   if (value == null) return [];
   if (Array.isArray(value)) {
-    const all = await Promise.all(value.map((v) => extractRefUuids(v, idCache, idResolver)));
+    const all = await Promise.all(value.map((v) => extractRefUuids(v, idCache, idResolver, keyContext)));
     return all.flat();
   }
   if (typeof value === "string") return UUID_RE.test(value) ? [value] : [];
   if (typeof value === "object") {
     const obj = value as Record<string, unknown>;
-    const blockUuid = obj["block/uuid"];
+
+    // Unverified against a live instance: the following shape detections (block/uuid, :block/uuid,
+    // uuid, :uuid, db/id, :db/id, id) represent potential DB entity references and are supported here
+    // as per the Logseq DB graph spec, but require manual user smoke testing to fully verify.
+    const blockUuid = obj["block/uuid"] ?? obj[":block/uuid"];
     if (typeof blockUuid === "string" && UUID_RE.test(blockUuid)) return [blockUuid];
-    if (typeof obj.uuid === "string" && UUID_RE.test(obj.uuid as string)) return [obj.uuid as string];
-    if (typeof obj.id === "number") {
-      const id = obj.id as number;
+
+    const uuid = obj["uuid"] ?? obj[":uuid"];
+    if (typeof uuid === "string" && UUID_RE.test(uuid)) return [uuid];
+
+    const rawId = obj["db/id"] ?? obj[":db/id"] ?? obj["id"];
+    if (typeof rawId === "number") {
+      const id = rawId;
       let cached = idCache.get(id);
       if (cached === undefined) {
         cached = await idResolver(id);
         idCache.set(id, cached);
       }
       return cached ? [cached] : [];
+    }
+
+    // Console warning when a :user.property/* value matches no known shape and isn't a plain primitive
+    if (keyContext && (keyContext.startsWith("user.property/") || keyContext.startsWith(":user.property/"))) {
+      console.warn(`[OutlineCanvas] Unrecognized entity reference shape for property ${keyContext}:`, value);
     }
   }
   return [];
@@ -251,7 +265,7 @@ async function extractRefs(
       kind = matchAdditionalRelKey(key, additionalRelKeys);
     }
     if (!kind) return;
-    const uuids = await extractRefUuids(value, idCache, idResolver);
+    const uuids = await extractRefUuids(value, idCache, idResolver, key);
     for (const targetUuid of uuids) {
       const sig = `${kind}|${targetUuid}`;
       if (!seen.has(sig)) {
@@ -586,19 +600,56 @@ export interface DatabaseWideDiscoveryOptions {
   maxNodes?: number;
 }
 
+async function extractAllRefsGenerically(
+  block: LogseqBlock,
+  idCache: Map<number, string | null>,
+  idResolver: IdResolver
+): Promise<{ kind: string; targetUuid: string }[]> {
+  const out: { kind: string; targetUuid: string }[] = [];
+  const seen = new Set<string>();
+
+  const processKeyVal = async (key: string, value: unknown) => {
+    const m = USER_PROP_RE.exec(key);
+    if (!m) return;
+
+    let rawName = m[1];
+    const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
+    if (suffixMatch) rawName = suffixMatch[1];
+
+    const normKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+    if (normKey === "tags") return;
+
+    const uuids = await extractRefUuids(value, idCache, idResolver, key);
+    for (const targetUuid of uuids) {
+      const sig = `${rawName}|${targetUuid}`;
+      if (!seen.has(sig)) {
+        seen.add(sig);
+        out.push({ kind: rawName, targetUuid });
+      }
+    }
+  };
+
+  for (const [key, value] of Object.entries(block)) {
+    await processKeyVal(key, value);
+  }
+  if (block.properties) {
+    for (const [key, value] of Object.entries(block.properties)) {
+      await processKeyVal(key, value);
+    }
+  }
+
+  return out;
+}
+
 export async function expandDatabaseWide(
   root: TreeNode,
   fetcher: RefFetcher,
   idResolver: IdResolver,
   tagProvider: TagProvider,
   blockFetcher: (uuid: string) => Promise<LogseqBlock | null>,
-  additionalRelKeys: string[] = [],
+  _additionalRelKeys: string[] = [],
   options: DatabaseWideDiscoveryOptions = {}
 ): Promise<TreeNode> {
-  // Relationship Exclusion: unlike expandOutOfScopeRefs which excludes relates_to and depends_on,
-  // expandDatabaseWide treats relates_to, depends_on, AND any custom additionalRelKeys as traversable.
-  // Refer to docs/feature-erd-out-of-scope-references.md's "Relationship Exclusion" section.
-
   const cloned = structuredClone(root);
   const cache = new Map<string, string>();
   const idCache = new Map<number, string | null>();
@@ -630,16 +681,26 @@ export async function expandDatabaseWide(
 
   while (queue.length > 0) {
     const parent = queue.shift()!;
-    if (!parent.refs || parent.refs.length === 0) continue;
+
+    const block = await blockFetcher(parent.uuid);
+    let allRefs: NodeRef[] = [];
+    if (block) {
+      allRefs = await extractAllRefsGenerically(block, idCache, idResolver);
+    } else {
+      allRefs = parent.refs || [];
+    }
+    if (allRefs.length === 0) {
+      parent.refs = [];
+      continue;
+    }
 
     const keepRefs: NodeRef[] = [];
     const seenTargetsForThisNode = new Set<string>();
 
-    for (const ref of parent.refs) {
-      const isAllowed = ref.kind === "relates_to" || ref.kind === "depends_on" || additionalRelKeys.includes(ref.kind);
+    for (const ref of allRefs) {
       const isNotVisited = !visited.has(ref.targetUuid);
 
-      if (isAllowed && isNotVisited) {
+      if (isNotVisited) {
         if (seenTargetsForThisNode.has(ref.targetUuid)) {
           continue;
         }
@@ -654,8 +715,6 @@ export async function expandDatabaseWide(
         }
 
         if (visited.has(ref.targetUuid)) {
-          // Visited by another node in the queue while this was waiting.
-          // Keep the ref so overlay edges can draw it.
           keepRefs.push(ref);
           continue;
         }
@@ -670,7 +729,7 @@ export async function expandDatabaseWide(
             const name = stripMarkdown(resolved) || "(empty)";
             const tags = await tagProvider.getTags(targetBlock.uuid);
             const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
-            const childRefs = await extractRefs(targetBlock, idCache, idResolver, additionalRelKeys);
+            const childRefs = await extractAllRefsGenerically(targetBlock, idCache, idResolver);
 
             const syntheticNode: TreeNode = {
               name,
