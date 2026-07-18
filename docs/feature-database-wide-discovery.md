@@ -9,7 +9,9 @@ This feature introduces a recursive, database-wide relationship discovery mechan
 1. **Trigger**: A new boolean setting **"Database-wide Discovery"** (default off) configured in Settings under the relationship section.
 2. **Behavior (when ON)**:
    - When active, OutlineCanvas traverses relationship properties recursively.
-   - Core relationship properties (`relates_to`, `depends_on`) AND enabled "Additional Relationship" properties are all treated as traversable.
+   - Traversal is generic and driven by data: any property under `:user.property/*` (e.g. `relates_to`, `depends_on`, `custom_prop`) is treated as a traversal candidate, and followed purely based on whether its value resolves to a valid block or page reference.
+   - Supported entity reference shapes include plain string UUIDs, `{uuid: "..."}`, `{"block/uuid": "..."}`, `{"db/id": N}`, and arrays of any of these shapes.
+   - Internal/system properties (e.g., `:block/*`, `:db/*`, `:logseq.property/*`) and `:block/tags` or `:user.property/tags` properties are explicitly excluded from traversal to prevent structural elements and class taxonomies from being treated as relationship nodes.
    - Traversals are cycle-safe. A single `visited` set of UUIDs is maintained across the entire walk to prevent duplicate fetching, duplicate nodes, or infinite loops.
    - Every block or page reachable this way is fetched and added as a TreeNode, and traversal continues from each newly discovered block/page.
    - Outgoing references of a synthetic node are resolved into children (if unvisited) or kept as references (if already visited, to allow overlay edges to connect them).
@@ -19,9 +21,10 @@ This feature introduces a recursive, database-wide relationship discovery mechan
 ## Known Limitations / Out of Scope
 - **View Limitation**: Applied strictly to the ERD view when relationship rendering is active.
 - **Node Cap Limitation**: Traversal stops when reaching `maxNodes` (500). Some far-off relationships may not be rendered if the graph is extremely large and the budget is exceeded.
+- **View Limitation (when OFF)**: Single-hop expandOutOfScopeRefs (non-database-wide mode) still restricts itself to the configured "Additional Relationship" property allow-list.
 
 ## Key Changes
-- **`src/settings.ts`**: Added `databaseWideDiscovery` to `PluginSettings`, `DEFAULTS`, schema registration, and setting getter.
-- **`src/adapter.ts`**: Implemented `expandDatabaseWide` with queue-based cycle-safe breadth-first traversal and the `maxNodes` cap. Added comments linking to `docs/feature-erd-out-of-scope-references.md`.
+- **`src/settings.ts`**: Added `databaseWideDiscovery` to `PluginSettings`, `DEFAULTS`, schema registration, and setting getter with updated generic behavior description.
+- **`src/adapter.ts`**: Implemented `expandDatabaseWide` with generic breadth-first traversal over `:user.property/*` values (excluding tags) and support for all reference data shapes.
 - **`src/index.ts`**: Wired `expandDatabaseWide` into `rebuildLayout` under the active-view/relationships conditions, branching on the `databaseWideDiscovery` setting.
-- **`src/adapter.database-wide.test.ts`**: Added comprehensive unit tests validating regression (single-hop behavior unchanged with setting off), multi-hop discovery, cycle-safety, cap limit enforcement, and relates-to/depends-on support.
+- **`src/adapter.database-wide.test.ts`**: Added comprehensive unit tests validating generic discovery of all entity reference shapes (`db/id`, `block/uuid`, plain UUID string), termination on plain values, and exclusions of internal system properties and tags.
