@@ -1,7 +1,7 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
 import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs } from "./adapter";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs, expandDatabaseWide } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
@@ -178,14 +178,23 @@ async function rebuildLayout(): Promise<void> {
     };
     const tagProvider = new DefaultTagProvider();
 
-    tree = await expandOutOfScopeRefs(
-      pruned,
-      getSelectedAdditionalRelationshipProperties(),
-      defaultFetcher,
-      defaultIdResolver,
-      tagProvider,
-      blockFetcher
-    );
+    tree = settings.databaseWideDiscovery
+      ? await expandDatabaseWide(
+          pruned,
+          defaultFetcher,
+          defaultIdResolver,
+          tagProvider,
+          blockFetcher,
+          getSelectedAdditionalRelationshipProperties()
+        )
+      : await expandOutOfScopeRefs(
+          pruned,
+          getSelectedAdditionalRelationshipProperties(),
+          defaultFetcher,
+          defaultIdResolver,
+          tagProvider,
+          blockFetcher
+        );
   }
 
   if (settings.showRelationships) {

@@ -579,3 +579,124 @@ export async function expandOutOfScopeRefs(
   await walk(cloned);
   return cloned;
 }
+
+
+export interface DatabaseWideDiscoveryOptions {
+  /** Safety cap on total nodes added by discovery. Default 500. */
+  maxNodes?: number;
+}
+
+export async function expandDatabaseWide(
+  root: TreeNode,
+  fetcher: RefFetcher,
+  idResolver: IdResolver,
+  tagProvider: TagProvider,
+  blockFetcher: (uuid: string) => Promise<LogseqBlock | null>,
+  additionalRelKeys: string[] = [],
+  options: DatabaseWideDiscoveryOptions = {}
+): Promise<TreeNode> {
+  // Relationship Exclusion: unlike expandOutOfScopeRefs which excludes relates_to and depends_on,
+  // expandDatabaseWide treats relates_to, depends_on, AND any custom additionalRelKeys as traversable.
+  // Refer to docs/feature-erd-out-of-scope-references.md's "Relationship Exclusion" section.
+
+  const cloned = structuredClone(root);
+  const cache = new Map<string, string>();
+  const idCache = new Map<number, string | null>();
+  let localNextId = 1000000 + Math.floor(Math.random() * 1000000);
+
+  const visited = new Set<string>();
+  function collectUuids(node: TreeNode) {
+    if (node.uuid) {
+      visited.add(node.uuid);
+    }
+    for (const child of node.children) {
+      collectUuids(child);
+    }
+  }
+  collectUuids(cloned);
+
+  const limit = options.maxNodes ?? 500;
+  let addedNodesCount = 0;
+  let loggedWarning = false;
+
+  const queue: TreeNode[] = [];
+  function enqueueExisting(node: TreeNode) {
+    queue.push(node);
+    for (const child of node.children) {
+      enqueueExisting(child);
+    }
+  }
+  enqueueExisting(cloned);
+
+  while (queue.length > 0) {
+    const parent = queue.shift()!;
+    if (!parent.refs || parent.refs.length === 0) continue;
+
+    const keepRefs: NodeRef[] = [];
+    const seenTargetsForThisNode = new Set<string>();
+
+    for (const ref of parent.refs) {
+      const isAllowed = ref.kind === "relates_to" || ref.kind === "depends_on" || additionalRelKeys.includes(ref.kind);
+      const isNotVisited = !visited.has(ref.targetUuid);
+
+      if (isAllowed && isNotVisited) {
+        if (seenTargetsForThisNode.has(ref.targetUuid)) {
+          continue;
+        }
+        seenTargetsForThisNode.add(ref.targetUuid);
+
+        if (addedNodesCount >= limit) {
+          if (!loggedWarning) {
+            console.warn("[OutlineCanvas] Database-wide Discovery stopped at maxNodes=" + limit);
+            loggedWarning = true;
+          }
+          continue;
+        }
+
+        if (visited.has(ref.targetUuid)) {
+          // Visited by another node in the queue while this was waiting.
+          // Keep the ref so overlay edges can draw it.
+          keepRefs.push(ref);
+          continue;
+        }
+
+        visited.add(ref.targetUuid);
+
+        try {
+          const targetBlock = await blockFetcher(ref.targetUuid);
+          if (targetBlock) {
+            const rawText = targetBlock.content ?? targetBlock.title ?? (targetBlock as any)[":block/title"] ?? "";
+            const resolved = await resolveNodeRefs(rawText, fetcher, cache);
+            const name = stripMarkdown(resolved) || "(empty)";
+            const tags = await tagProvider.getTags(targetBlock.uuid);
+            const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
+            const childRefs = await extractRefs(targetBlock, idCache, idResolver, additionalRelKeys);
+
+            const syntheticNode: TreeNode = {
+              name,
+              children: [],
+              depth: parent.depth + 1,
+              id: localNextId++,
+              uuid: targetBlock.uuid,
+              properties,
+              tags: [...tags],
+              refs: childRefs
+            };
+
+            parent.children.push(syntheticNode);
+            addedNodesCount++;
+            queue.push(syntheticNode);
+          }
+        } catch (err) {
+          console.error("expandDatabaseWide: failed to fetch block", ref.targetUuid, err);
+        }
+      } else {
+        keepRefs.push(ref);
+      }
+    }
+
+    parent.refs = keepRefs;
+  }
+
+  return cloned;
+}
