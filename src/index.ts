@@ -143,58 +143,61 @@ function composeElements(): void {
 async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
-  const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
 
-  let tree = pruned;
-  if (activeView === "erd" && settings.showRelationships) {
-    const defaultIdResolver = async (id: number) => {
-      try {
-        const b = await logseq.Editor.getBlock(id);
-        return b?.uuid || null;
-      } catch { return null; }
-    };
-    const defaultFetcher = async (uuid: string) => {
-      try {
-        const block = await logseq.Editor.getBlock(uuid);
-        if (block) {
-          const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
-          if (t && t.trim()) return t;
-        }
-      } catch { }
-      try {
-        const page = await logseq.Editor.getPage(uuid);
-        if (page) {
-          const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
-          if (t && t.trim()) return t;
-        }
-      } catch { }
-      return null;
-    };
-    const blockFetcher = async (uuid: string) => {
-      try {
-        const block = await logseq.Editor.getBlock(uuid);
-        return block as any;
-      } catch { return null; }
-    };
-    const tagProvider = new DefaultTagProvider();
+  const defaultIdResolver = async (id: number) => {
+    try {
+      const b = await logseq.Editor.getBlock(id);
+      return b?.uuid || null;
+    } catch { return null; }
+  };
+  const defaultFetcher = async (uuid: string) => {
+    try {
+      const block = await logseq.Editor.getBlock(uuid);
+      if (block) {
+        const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
+        if (t && t.trim()) return t;
+      }
+    } catch { }
+    try {
+      const page = await logseq.Editor.getPage(uuid);
+      if (page) {
+        const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
+        if (t && t.trim()) return t;
+      }
+    } catch { }
+    return null;
+  };
+  const blockFetcher = async (uuid: string) => {
+    try {
+      const block = await logseq.Editor.getBlock(uuid);
+      return block as any;
+    } catch { return null; }
+  };
+  const tagProvider = new DefaultTagProvider();
 
-    tree = settings.databaseWideDiscovery
-      ? await expandDatabaseWide(
-          pruned,
-          defaultFetcher,
-          defaultIdResolver,
-          tagProvider,
-          blockFetcher,
-          getSelectedAdditionalRelationshipProperties()
-        )
-      : await expandOutOfScopeRefs(
-          pruned,
-          getSelectedAdditionalRelationshipProperties(),
-          defaultFetcher,
-          defaultIdResolver,
-          tagProvider,
-          blockFetcher
-        );
+  let tree: TreeNode;
+  if (activeView === "erd" && settings.showRelationships && settings.databaseWideDiscovery) {
+    tree = await expandDatabaseWide(
+      currentTree,
+      defaultFetcher,
+      defaultIdResolver,
+      tagProvider,
+      blockFetcher,
+      getSelectedAdditionalRelationshipProperties()
+    );
+  } else {
+    const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
+    tree = pruned;
+    if (activeView === "erd" && settings.showRelationships) {
+      tree = await expandOutOfScopeRefs(
+        pruned,
+        getSelectedAdditionalRelationshipProperties(),
+        defaultFetcher,
+        defaultIdResolver,
+        tagProvider,
+        blockFetcher
+      );
+    }
   }
 
   if (settings.showRelationships) {

@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from "vitest";
-import { expandDatabaseWide, expandOutOfScopeRefs } from "./adapter";
+import { expandDatabaseWide, expandOutOfScopeRefs, flattenDeep } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -359,5 +359,90 @@ describe("Database-wide Discovery Tests", () => {
     const childUuids = nodeA.children.map(c => c.uuid);
     expect(childUuids).toContain(UUID_B);
     expect(childUuids).toContain(UUID_C);
+  });
+
+  // 6. Depth-pruning-before-discovery regression test:
+  it("depth-pruning-before-discovery regression test: deep ref at depth >= maxDepth", async () => {
+    const tree: TreeNode = {
+      name: "Root (depth 0)",
+      depth: 0,
+      id: 0,
+      uuid: "uuid-root",
+      children: [
+        {
+          name: "Child (depth 1)",
+          depth: 1,
+          id: 1,
+          uuid: "uuid-depth-1",
+          children: [
+            {
+              name: "Grandchild (depth 2)",
+              depth: 2,
+              id: 2,
+              uuid: "uuid-depth-2",
+              children: [
+                {
+                  name: "Great-grandchild (depth 3)",
+                  depth: 3,
+                  id: 3,
+                  uuid: "uuid-depth-3",
+                  children: [],
+                  refs: [
+                    { kind: "rel_custom", targetUuid: UUID_B }
+                  ]
+                }
+              ],
+              refs: []
+            }
+          ],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_B) {
+        return {
+          uuid: UUID_B,
+          content: "Block B"
+        };
+      }
+      return null;
+    });
+
+    // 6a. Calling flattenDeep(tree, 3, "recursive") then expandDatabaseWide on pruned result
+    // does NOT find or expand the deep ref because flattenDeep at maxDepth=3 deletes everything at depth >= 2
+    const pruned = flattenDeep(tree, 3, "recursive");
+    const resultPruned = await expandDatabaseWide(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      ["rel_custom"]
+    );
+
+    // Deepest child in pruned will be "Grandchild (depth 2)" which has children: []
+    const grandchildPruned = resultPruned.children[0].children[0];
+    expect(grandchildPruned.children).toHaveLength(0); // Great-grandchild is pruned away entirely!
+
+    // 6b. Calling expandDatabaseWide directly on un-pruned tree DOES find and expand it
+    const resultUnpruned = await expandDatabaseWide(
+      tree,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      ["rel_custom"]
+    );
+
+    const nodeA = resultUnpruned.children[0]; // Child (depth 1)
+    const node1 = nodeA.children[0];          // Grandchild (depth 2)
+    const node2 = node1.children[0];          // Great-grandchild (depth 3)
+
+    expect(node2.uuid).toBe("uuid-depth-3");
+    expect(node2.children).toHaveLength(1);
+    expect(node2.children[0].uuid).toBe(UUID_B);
   });
 });
