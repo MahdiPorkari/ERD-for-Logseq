@@ -653,8 +653,6 @@ export async function getNodeTypePropertyNames(): Promise<Set<string>> {
           return schemaVal.toLowerCase();
         }
       }
-      const fallbackType = propObj["type"] ?? propObj[":type"];
-      if (typeof fallbackType === "string") return fallbackType.toLowerCase();
       return null;
     };
 
@@ -668,7 +666,7 @@ export async function getNodeTypePropertyNames(): Promise<Set<string>> {
         key = entry;
       } else if (typeof entry === "object") {
         propObj = entry;
-        key = propObj.title ?? propObj.name ?? propObj.originalName ?? propObj["block/title"] ?? propObj["db/ident"];
+        key = propObj.title ?? propObj.name ?? propObj.originalName ?? propObj["block/title"] ?? propObj["db/ident"] ?? propObj[":db/ident"];
       }
 
       if (!key) continue;

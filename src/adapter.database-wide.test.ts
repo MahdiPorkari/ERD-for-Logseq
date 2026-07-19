@@ -659,4 +659,240 @@ describe("Database-wide Discovery Tests", () => {
     expect(nodeA.children).toHaveLength(0); // none should be traversed
     vi.unstubAllGlobals();
   });
+
+  // 10. Fix shape detection for getAllProperties with colon-prefixed `:db/ident` and outer `type: "property"`
+  it("generic discovery: handles colon-prefixed :db/ident and nested :logseq.property/schema while ignoring outer type: 'property'", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            ":db/ident": "assignee",
+            "type": "property", // Page discriminator, must be ignored!
+            ":logseq.property/schema": {
+              ":type": "node"
+            }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          ":user.property/assignee": UUID_B
+        };
+      }
+      if (uuid === UUID_B) {
+        return {
+          uuid: UUID_B,
+          content: "Block B"
+        };
+      }
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    expect(nodeA.children).toHaveLength(1);
+    expect(nodeA.children[0].uuid).toBe(UUID_B);
+
+    vi.unstubAllGlobals();
+  });
+
+  // 11. Verify that synthetic nodes correctly carry their own independent custom properties
+  it("generic discovery: synthetic nodes carry their own custom properties independent of the main page", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            ":db/ident": "assignee",
+            ":logseq.property/schema": {
+              ":type": "node"
+            }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          ":user.property/assignee": UUID_B
+        };
+      }
+      if (uuid === UUID_B) {
+        return {
+          uuid: UUID_B,
+          content: "Block B",
+          ":user.property/custom_role": "Lead Architect"
+        };
+      }
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    expect(nodeA.children).toHaveLength(1);
+
+    const nodeB = nodeA.children[0];
+    expect(nodeB.uuid).toBe(UUID_B);
+    expect(nodeB.properties).toBeDefined();
+    // Verify properties contains custom_role -> Custom Role: Lead Architect
+    expect(nodeB.properties).toContainEqual({
+      name: "Custom Role",
+      value: "Lead Architect"
+    });
+
+    vi.unstubAllGlobals();
+  });
+
+  // 12. Depth pruning after database-wide discovery correctly enforces maxDepth
+  it("maxDepth pruning: successfully discovers deep relationships recursively first, then prunes the resulting expanded tree to maxDepth", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            ":db/ident": "assignee",
+            ":logseq.property/schema": {
+              ":type": "node"
+            }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Child 1",
+          depth: 1,
+          id: 1,
+          uuid: "child-1",
+          children: [],
+          refs: [
+            { kind: "assignee", targetUuid: UUID_B }
+          ]
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_B) {
+        return {
+          uuid: UUID_B,
+          content: "Block B",
+          ":user.property/assignee": UUID_C
+        };
+      }
+      if (uuid === UUID_C) {
+        return {
+          uuid: UUID_C,
+          content: "Block C",
+          ":user.property/assignee": UUID_D
+        };
+      }
+      if (uuid === UUID_D) {
+        return {
+          uuid: UUID_D,
+          content: "Block D"
+        };
+      }
+      return null;
+    });
+
+    // 12a. Expand database wide first (independent of pruning)
+    const expanded = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    // Verify all nodes A -> B -> C -> D are discovered first
+    const nodeA = expanded.children[0];
+    const nodeB = nodeA.children[0];
+    expect(nodeB.uuid).toBe(UUID_B);
+    const nodeC = nodeB.children[0];
+    expect(nodeC.uuid).toBe(UUID_C);
+    const nodeD = nodeC.children[0];
+    expect(nodeD.uuid).toBe(UUID_D);
+
+    // 12b. Apply flattenDeep(expanded, 3, "recursive") -> maxDepth = 3.
+    // Root is depth 0.
+    // Child 1 is depth 1.
+    // Block B is depth 2.
+    // Any node at depth >= maxDepth - 1 (3 - 1 = 2) should have its children pruned away.
+    // So Block B should have children = [] (Block C is pruned).
+    const pruned = flattenDeep(expanded, 3, "recursive");
+    const prunedA = pruned.children[0];
+    const prunedB = prunedA.children[0];
+    expect(prunedB.uuid).toBe(UUID_B);
+    expect(prunedB.children).toHaveLength(0); // C and D are pruned away!
+
+    vi.unstubAllGlobals();
+  });
 });
