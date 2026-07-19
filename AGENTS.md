@@ -1,7 +1,5 @@
 # AGENTS.md
 
-*Merged file — combines the repo-specific operational guide (originally `AGENTS.md`) with the Logseq DB Plugin API skill reference (originally uploaded as `AGENTS.md` but structured as a skill document with its own frontmatter). Nothing from either source was removed; headings were nested/renumbered so both documents coexist in one file. See Part 1 for day-to-day agent rules and Part 2 for the API reference.*
-
 ## Part 1: Repository Operational Guide
 
 
