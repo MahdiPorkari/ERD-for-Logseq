@@ -1,5 +1,5 @@
 import type { TreeNode, RenderElement, Rect, RelKind, CurveElement } from "../types";
-import { theme } from "../colors";
+import { theme, branchColor } from "../colors";
 
 interface Edge {
   x1: number; y1: number;
@@ -88,6 +88,45 @@ function makeEdge(s: Rect, t: Rect, kind: RelKind): CurveElement {
   const g = pickEdgeGeometry(s, t);
   const t_ = theme();
 
+  if (kind === "parent-child") {
+    return {
+      type: "curve", ...g,
+      color: t_.connectorDepends,
+      lw: 1.6,
+      arrowEnd: true,
+    };
+  }
+  if (kind === "reference") {
+    return {
+      type: "curve", ...g,
+      color: t_.connectorRelates,
+      lw: 1.4,
+      dash: [6, 4],
+      arrowEnd: true,
+    };
+  }
+  if (kind === "tag") {
+    const tagColor = branchColor(2).stroke; // purple from available theme colors
+    return {
+      type: "curve", ...g,
+      color: tagColor,
+      lw: 1.4,
+      dash: [2, 4],
+      arrowEnd: false,
+    };
+  }
+  if (kind === "property") {
+    const propColor = branchColor(0).stroke; // blue from available theme colors
+    return {
+      type: "curve", ...g,
+      color: propColor,
+      lw: 1.4,
+      dash: [8, 4, 2, 4],
+      arrowEnd: true,
+    };
+  }
+
+  // Fallback to legacy modes
   if (kind === "depends_on") {
     return {
       type: "curve", ...g,
@@ -136,7 +175,6 @@ export function buildEdgeElements(
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
 
-
           els.push(makeEdge(source, target, ref.kind));
         }
       }
@@ -173,12 +211,30 @@ export function buildEdgeLabels(
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
 
-          if (ref.kind !== "relates_to" && ref.kind !== "depends_on") continue;
+          if (
+            ref.kind !== "relates_to" &&
+            ref.kind !== "depends_on" &&
+            ref.kind !== "parent-child" &&
+            ref.kind !== "reference" &&
+            ref.kind !== "tag" &&
+            ref.kind !== "property"
+          ) {
+            continue;
+          }
 
           const g = pickEdgeGeometry(source, target);
           const mid = bezierMidpoint(g);
           const label = ref.kind;
           const w = label.length * LABEL_CHAR_W + LABEL_PAD_X * 2;
+
+          let edgeColor = t_.connectorRelates;
+          if (ref.kind === "parent-child" || ref.kind === "depends_on") {
+            edgeColor = t_.connectorDepends;
+          } else if (ref.kind === "tag") {
+            edgeColor = branchColor(2).stroke;
+          } else if (ref.kind === "property") {
+            edgeColor = branchColor(0).stroke;
+          }
 
           // Solid bg-colored pill to occlude crossing curves for readability.
           els.push({
@@ -187,7 +243,7 @@ export function buildEdgeLabels(
             y: mid.y - LABEL_H / 2,
             w, h: LABEL_H,
             fill: t_.bg,
-            stroke: ref.kind === "depends_on" ? t_.connectorDepends : t_.connectorRelates,
+            stroke: edgeColor,
             lw: 1,
             rad: LABEL_H / 2,
           });

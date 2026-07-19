@@ -3,6 +3,7 @@ import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./t
 import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
 import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs, expandDatabaseWide } from "./adapter";
 import type { LogseqBlock } from "./adapter";
+import { globalIndexer } from "./indexer";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
 import { render, hitTest } from "./renderer";
@@ -29,6 +30,7 @@ const VIEWS: ViewDef[] = [
   { id: "fish", label: "Fishbone", icon: "⟜", layout: layoutFishbone },
   { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
   { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
+  { id: "erd2", label: "ERD v.2", icon: "⇿", layout: layoutERD },
 ];
 
 // Plugin state
@@ -44,6 +46,24 @@ let controllerState = createState();
 let cleanupController: (() => void) | null = null;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let isDocked = true; // default to docked mode
+
+const defaultFetcher = async (uuid: string) => {
+  try {
+    const block = await logseq.Editor.getBlock(uuid);
+    if (block) {
+      const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
+      if (t && t.trim()) return t;
+    }
+  } catch { }
+  try {
+    const page = await logseq.Editor.getPage(uuid);
+    if (page) {
+      const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
+      if (t && t.trim()) return t;
+    }
+  } catch { }
+  return null;
+};
 
 /**
  * Logseq persists plugin container layout and silently ignores
@@ -107,13 +127,22 @@ function composeElements(): void {
   const rects = currentLayout.nodeRectsByUuid;
   const additionalSelected = getSelectedAdditionalRelationshipProperties();
   const allowedKinds = new Set<string>();
-  if (settings.showRelationships) {
-    allowedKinds.add("relates_to");
-    allowedKinds.add("depends_on");
+
+  if (activeView === "erd2") {
+    allowedKinds.add("reference");
+    allowedKinds.add("tag");
+    allowedKinds.add("property");
+    allowedKinds.add("parent-child");
+  } else {
+    if (settings.showRelationships) {
+      allowedKinds.add("relates_to");
+      allowedKinds.add("depends_on");
+    }
+    if (activeView === "erd" && settings.showRelationships) {
+      for (const name of additionalSelected) allowedKinds.add(name);
+    }
   }
-  if (activeView === "erd" && settings.showRelationships) {
-    for (const name of additionalSelected) allowedKinds.add(name);
-  }
+
   const wantOverlay = allowedKinds.size > 0 && !!rects;
   const overlayTree = wantOverlay ? filterRefsByKind(currentDisplayTree, allowedKinds as Set<any>) : currentDisplayTree;
 
@@ -144,28 +173,35 @@ async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
 
+  if (activeView === "erd2") {
+    // ERD v.2 is pre-built, no depth flattening or expandDatabaseWide needed here
+    const view = VIEWS.find((v) => v.id === activeView)!;
+    const result = view.layout(currentTree, settings.maxDepth);
+
+    currentDisplayTree = currentTree;
+    currentLayout = result;
+    composeElements();
+
+    let refCount = 0;
+    (function count(n: TreeNode): void {
+      refCount += n.refs?.length ?? 0;
+      for (const c of n.children) count(c);
+    })(currentTree);
+    console.debug(
+      `[OutlineCanvas] view=${activeView} focus=${focusedUuid ?? "none"} refs(intra-tree)=${refCount} rects=${result.nodeRectsByUuid?.size ?? 0}`
+    );
+
+    const { w, h } = getCanvasSize();
+    controllerState.transform = fitToView(result.bounds, w, h);
+    redraw();
+    return;
+  }
+
   const defaultIdResolver = async (id: number) => {
     try {
       const b = await logseq.Editor.getBlock(id);
       return b?.uuid || null;
     } catch { return null; }
-  };
-  const defaultFetcher = async (uuid: string) => {
-    try {
-      const block = await logseq.Editor.getBlock(uuid);
-      if (block) {
-        const t = (block as any)[":block/title"] || (block as any).title || (block as any).content;
-        if (t && t.trim()) return t;
-      }
-    } catch { }
-    try {
-      const page = await logseq.Editor.getPage(uuid);
-      if (page) {
-        const t = (page as any).originalName ?? (page as any).name ?? (page as any).title;
-        if (t && t.trim()) return t;
-      }
-    } catch { }
-    return null;
   };
   const blockFetcher = async (uuid: string) => {
     try {
@@ -237,6 +273,33 @@ function setFocus(uuid: string | null): void {
 
 async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
+
+  if (activeView === "erd2") {
+    // ERD v.2 is backed by background index
+    const page = await logseq.Editor.getCurrentPage();
+    if (!page) return;
+    const pageUuid = (page as any).uuid;
+    const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
+
+    // Get all block UUIDs on the page
+    const blocks = await logseq.Editor.getPageBlocksTree(pageName);
+    const blockUuids: string[] = [];
+    const collectUuids = (blks: any[]) => {
+      for (const b of blks) {
+        if (b.uuid) blockUuids.push(b.uuid);
+        if (b.children) collectUuids(b.children);
+      }
+    };
+    if (blocks) collectUuids(blocks);
+
+    currentTree = await globalIndexer.buildERDV2Tree(pageUuid, blockUuids, pageName, defaultFetcher);
+    focusedUuid = null;
+    if (currentTree) {
+      await rebuildLayout();
+    }
+    return;
+  }
+
   currentTree = blockUuid
     ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, getSelectedAdditionalRelationshipProperties())
     : await fetchTree(settings.showEmptyBlocks, getSelectedAdditionalRelationshipProperties());
@@ -547,6 +610,12 @@ function setupCanvas(): void {
       case "oc-fit": await rebuildLayout(); break;
       case "oc-export": exportCurrentView(); break;
       case "oc-copy": copyCurrentView(); break;
+      case "oc-refresh": {
+        await globalIndexer.initialize();
+        await loadTree();
+        logseq.UI.showMsg("OutlineCanvas: view and index refreshed", "success");
+        break;
+      }
     }
   }, true);
 }
@@ -627,6 +696,11 @@ async function main(): Promise<void> {
   // Settings
   await registerSettings();
   activeView = getSettings().defaultView;
+
+  // Initialize and subscribe BackgroundIndexer
+  await globalIndexer.initialize();
+  const offIndexer = globalIndexer.subscribeToChanges();
+  offHooks.push(offIndexer);
 
   // Detect initial theme
   try {
@@ -809,6 +883,7 @@ async function main(): Promise<void> {
   // Live updates via DB.onChanged (debounced)
   const offChanged = logseq.DB.onChanged(() => {
     if (!logseq.isMainUIVisible) return;
+    if (activeView === "erd2") return; // ERD v.2 does not auto-refresh on navigation or live edits
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       loadTree();

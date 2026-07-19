@@ -23,6 +23,7 @@ const VIEW_LAYOUTS: Record<ViewId, (root: TreeNode, maxDepth: number) => LayoutR
   fish: layoutFishbone,
   tmap: layoutTreemap,
   erd: layoutERD,
+  erd2: layoutERD,
 };
 
 /**
