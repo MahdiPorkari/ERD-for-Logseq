@@ -177,7 +177,7 @@ async function rebuildLayout(): Promise<void> {
 
   let tree: TreeNode;
   if (activeView === "erd" && settings.showRelationships && settings.databaseWideDiscovery) {
-    tree = await expandDatabaseWide(
+    const expanded = await expandDatabaseWide(
       currentTree,
       defaultFetcher,
       defaultIdResolver,
@@ -185,6 +185,7 @@ async function rebuildLayout(): Promise<void> {
       blockFetcher,
       getSelectedAdditionalRelationshipProperties()
     );
+    tree = flattenDeep(expanded, settings.maxDepth, settings.depthMode);
   } else {
     const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
     tree = pruned;
