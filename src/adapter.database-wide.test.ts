@@ -446,8 +446,32 @@ describe("Database-wide Discovery Tests", () => {
     expect(node2.children[0].uuid).toBe(UUID_B);
   });
 
-  // 7. Handles various entity reference shapes (db/id, block/uuid, plain UUID)
-  it("generic discovery: handles various entity reference shapes (db/id, block/uuid, plain UUID)", async () => {
+  // 7. Handles various entity reference shapes (db/id, block/uuid, plain UUID) when defined as type: 'node'
+  it("generic discovery: handles various entity reference shapes (db/id, block/uuid, plain UUID) when defined as type: 'node'", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            name: "ref-db-id",
+            ":logseq.property/schema": { type: "node" }
+          },
+          {
+            name: "ref-block-uuid",
+            ":logseq.property/schema": { type: "node" }
+          },
+          {
+            name: "ref-plain-uuid",
+            ":logseq.property/schema": { type: "node" }
+          },
+          {
+            name: "coincid-uuid",
+            ":logseq.property/schema": { type: "default" } // non-node type property
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
     const root: TreeNode = {
       name: "Root",
       depth: 0,
@@ -472,12 +496,14 @@ describe("Database-wide Discovery Tests", () => {
           uuid: UUID_A,
           ":user.property/ref-db-id": { "db/id": 42 },
           ":user.property/ref-block-uuid": { "block/uuid": UUID_C },
-          ":user.property/ref-plain-uuid": UUID_D
+          ":user.property/ref-plain-uuid": UUID_D,
+          ":user.property/coincid-uuid": UUID_E // value shape matches UUID but is NOT followed because it is type: "default"
         };
       }
       if (uuid === UUID_B) return { uuid: UUID_B, content: "Block B" };
       if (uuid === UUID_C) return { uuid: UUID_C, content: "Block C" };
       if (uuid === UUID_D) return { uuid: UUID_D, content: "Block D" };
+      if (uuid === UUID_E) return { uuid: UUID_E, content: "Block E" };
       return null;
     });
 
@@ -496,16 +522,39 @@ describe("Database-wide Discovery Tests", () => {
     );
 
     const nodeA = result.children[0];
-    // Block A should have discovered B, C, and D!
+    // Block A should have discovered B, C, and D! But NOT E (since E belongs to property coincidentally containing UUID which is type 'default').
     expect(nodeA.children).toHaveLength(3);
     const discoveredUuids = nodeA.children.map(c => c.uuid);
     expect(discoveredUuids).toContain(UUID_B);
     expect(discoveredUuids).toContain(UUID_C);
     expect(discoveredUuids).toContain(UUID_D);
+    expect(discoveredUuids).not.toContain(UUID_E);
+
+    vi.unstubAllGlobals();
   });
 
   // 8. Plain non-reference values are not treated as traversable
   it("generic discovery: plain non-reference values are not treated as traversable", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            name: "text-prop",
+            ":logseq.property/schema": { type: "default" }
+          },
+          {
+            name: "num-prop",
+            ":logseq.property/schema": { type: "number" }
+          },
+          {
+            name: "bool-prop",
+            ":logseq.property/schema": { type: "checkbox" }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
     const root: TreeNode = {
       name: "Root",
       depth: 0,
@@ -547,10 +596,23 @@ describe("Database-wide Discovery Tests", () => {
 
     const nodeA = result.children[0];
     expect(nodeA.children).toHaveLength(0); // traversal ends naturally
+    vi.unstubAllGlobals();
   });
 
   // 9. Internal/system properties and tags are excluded from traversal
   it("generic discovery: internal/system properties and tags are excluded from traversal", async () => {
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            name: "tags",
+            ":logseq.property/schema": { type: "node" }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
     const root: TreeNode = {
       name: "Root",
       depth: 0,
@@ -595,5 +657,6 @@ describe("Database-wide Discovery Tests", () => {
 
     const nodeA = result.children[0];
     expect(nodeA.children).toHaveLength(0); // none should be traversed
+    vi.unstubAllGlobals();
   });
 });

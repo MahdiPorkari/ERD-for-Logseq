@@ -177,8 +177,9 @@ export async function registerSettings(): Promise<void> {
       description:
         "ERD view only. When enabled, relationship traversal is not limited " +
         "to the current page: the diagram recursively follows any user property " +
-        "containing a valid page or block reference across the entire graph " +
-        "until no further references are found. Can be slow on large graphs.",
+        "configured with the database schema type 'node' containing page or block " +
+        "references across the entire graph until no further references are found. " +
+        "Can be slow on large graphs.",
     },
     {
       key: "dockBehavior",

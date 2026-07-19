@@ -600,10 +600,108 @@ export interface DatabaseWideDiscoveryOptions {
   maxNodes?: number;
 }
 
+function normalizePropertyName(key: string): string {
+  let name = key.startsWith(":") ? key.slice(1) : key;
+  if (name.startsWith("user.property/")) {
+    name = name.slice("user.property/".length);
+  } else if (name.startsWith("logseq.")) {
+    name = name.slice("logseq.".length);
+  }
+  const suffixMatch = name.match(/^(.+)-[a-zA-Z0-9]+$/);
+  if (suffixMatch) {
+    name = suffixMatch[1];
+  }
+  return name.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+}
+
+export async function getNodeTypePropertyNames(): Promise<Set<string>> {
+  const nodeTypeProps = new Set<string>();
+  try {
+    if (typeof logseq === "undefined" || !logseq.Editor || !logseq.Editor.getAllProperties) {
+      return nodeTypeProps;
+    }
+    const allProperties = await logseq.Editor.getAllProperties();
+    if (!allProperties) return nodeTypeProps;
+
+    const extractType = (propObj: any): string | null => {
+      if (!propObj || typeof propObj !== "object") return null;
+      let schemaVal = propObj[":logseq.property/schema"] ??
+                      propObj["logseq.property/schema"] ??
+                      propObj[":schema"] ??
+                      propObj["schema"];
+      if (!schemaVal) {
+        for (const k of Object.keys(propObj)) {
+          if (k.toLowerCase().includes("schema")) {
+            schemaVal = propObj[k];
+            break;
+          }
+        }
+      }
+      if (schemaVal) {
+        if (typeof schemaVal === "object" && schemaVal !== null) {
+          let typeVal = schemaVal["type"] ?? schemaVal[":type"];
+          if (!typeVal) {
+            for (const k of Object.keys(schemaVal)) {
+              if (k.toLowerCase().includes("type")) {
+                typeVal = schemaVal[k];
+                break;
+              }
+            }
+          }
+          if (typeof typeVal === "string") return typeVal.toLowerCase();
+        } else if (typeof schemaVal === "string") {
+          return schemaVal.toLowerCase();
+        }
+      }
+      const fallbackType = propObj["type"] ?? propObj[":type"];
+      if (typeof fallbackType === "string") return fallbackType.toLowerCase();
+      return null;
+    };
+
+    for (const entry of allProperties) {
+      if (!entry) continue;
+
+      let key: string | undefined;
+      let propObj: any = null;
+
+      if (typeof entry === "string") {
+        key = entry;
+      } else if (typeof entry === "object") {
+        propObj = entry;
+        key = propObj.title ?? propObj.name ?? propObj.originalName ?? propObj["block/title"] ?? propObj["db/ident"];
+      }
+
+      if (!key) continue;
+
+      let type: string | null = null;
+      if (propObj) {
+        type = extractType(propObj);
+      }
+
+      if (!type && logseq.Editor.getProperty) {
+        try {
+          const fullProp = await logseq.Editor.getProperty(key);
+          if (fullProp) {
+            type = extractType(fullProp);
+          }
+        } catch { /* ignore */ }
+      }
+
+      if (type === "node") {
+        nodeTypeProps.add(normalizePropertyName(key));
+      }
+    }
+  } catch (err) {
+    console.error("[OutlineCanvas] Failed to retrieve node type properties:", err);
+  }
+  return nodeTypeProps;
+}
+
 async function extractAllRefsGenerically(
   block: LogseqBlock,
   idCache: Map<number, string | null>,
-  idResolver: IdResolver
+  idResolver: IdResolver,
+  nodeTypeProps: Set<string>
 ): Promise<{ kind: string; targetUuid: string }[]> {
   const out: { kind: string; targetUuid: string }[] = [];
   const seen = new Set<string>();
@@ -618,6 +716,10 @@ async function extractAllRefsGenerically(
 
     const normKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
     if (normKey === "tags") return;
+
+    // Filter by schema type 'node'
+    const normalizedName = normalizePropertyName(key);
+    if (!nodeTypeProps.has(normalizedName)) return;
 
     const uuids = await extractRefUuids(value, idCache, idResolver, key);
     for (const targetUuid of uuids) {
@@ -655,6 +757,16 @@ export async function expandDatabaseWide(
   const idCache = new Map<number, string | null>();
   let localNextId = 1000000 + Math.floor(Math.random() * 1000000);
 
+  // Fetch and cache node-type properties for the duration of this call
+  const nodeTypeProps = await getNodeTypePropertyNames();
+  // Ensure core properties are always included
+  nodeTypeProps.add("relates_to");
+  nodeTypeProps.add("depends_on");
+  // Ensure passed additional relationship properties are also included for backward compatibility
+  for (const key of _additionalRelKeys) {
+    nodeTypeProps.add(normalizePropertyName(key));
+  }
+
   const visited = new Set<string>();
   function collectUuids(node: TreeNode) {
     if (node.uuid) {
@@ -685,7 +797,7 @@ export async function expandDatabaseWide(
     const block = await blockFetcher(parent.uuid);
     let allRefs: NodeRef[] = [];
     if (block) {
-      allRefs = await extractAllRefsGenerically(block, idCache, idResolver);
+      allRefs = await extractAllRefsGenerically(block, idCache, idResolver, nodeTypeProps);
     } else {
       allRefs = parent.refs || [];
     }
@@ -729,7 +841,7 @@ export async function expandDatabaseWide(
             const name = stripMarkdown(resolved) || "(empty)";
             const tags = await tagProvider.getTags(targetBlock.uuid);
             const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
-            const childRefs = await extractAllRefsGenerically(targetBlock, idCache, idResolver);
+            const childRefs = await extractAllRefsGenerically(targetBlock, idCache, idResolver, nodeTypeProps);
 
             const syntheticNode: TreeNode = {
               name,
