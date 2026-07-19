@@ -617,11 +617,9 @@ function normalizePropertyName(key: string): string {
 export async function getNodeTypePropertyNames(): Promise<Set<string>> {
   const nodeTypeProps = new Set<string>();
   try {
-    if (typeof logseq === "undefined" || !logseq.Editor || !logseq.Editor.getAllProperties) {
+    if (typeof logseq === "undefined") {
       return nodeTypeProps;
     }
-    const allProperties = await logseq.Editor.getAllProperties();
-    if (!allProperties) return nodeTypeProps;
 
     const extractType = (propObj: any): string | null => {
       if (!propObj || typeof propObj !== "object") return null;
@@ -656,39 +654,75 @@ export async function getNodeTypePropertyNames(): Promise<Set<string>> {
       return null;
     };
 
-    for (const entry of allProperties) {
-      if (!entry) continue;
+    let queried = false;
+    if (logseq.DB && logseq.DB.datascriptQuery) {
+      try {
+        const query = `[:find (pull ?p [:db/ident :block/title :logseq.property/schema])
+                        :where [?p :block/type "property"]]`;
+        const results = await logseq.DB.datascriptQuery(query);
+        if (Array.isArray(results) && results.length > 0) {
+          queried = true;
+          const flatResults = results.flat();
+          for (const item of flatResults) {
+            if (!item || typeof item !== "object") continue;
 
-      let key: string | undefined;
-      let propObj: any = null;
+            const title = item[":block/title"] ?? item["block/title"];
+            const ident = item[":db/ident"] ?? item["db/ident"];
+            const key = title ?? ident;
+            if (!key) continue;
 
-      if (typeof entry === "string") {
-        key = entry;
-      } else if (typeof entry === "object") {
-        propObj = entry;
-        key = propObj.title ?? propObj.name ?? propObj.originalName ?? propObj["block/title"] ?? propObj["db/ident"] ?? propObj[":db/ident"];
-      }
-
-      if (!key) continue;
-
-      let type: string | null = null;
-      if (propObj) {
-        type = extractType(propObj);
-      }
-
-      if (!type && logseq.Editor.getProperty) {
-        try {
-          const fullProp = await logseq.Editor.getProperty(key);
-          if (fullProp) {
-            type = extractType(fullProp);
+            const type = extractType(item);
+            if (type === "node") {
+              nodeTypeProps.add(normalizePropertyName(key));
+            }
           }
-        } catch { /* ignore */ }
-      }
-
-      if (type === "node") {
-        nodeTypeProps.add(normalizePropertyName(key));
+        }
+      } catch (err) {
+        console.warn("[OutlineCanvas] Datascript property schema query failed:", err);
       }
     }
+
+    // Defensive secondary fallback path if the Datascript query throws or returns empty
+    if (!queried && logseq.Editor && logseq.Editor.getAllProperties) {
+      const allProperties = await logseq.Editor.getAllProperties();
+      if (allProperties) {
+        for (const entry of allProperties) {
+          if (!entry) continue;
+
+          let key: string | undefined;
+          let propObj: any = null;
+
+          if (typeof entry === "string") {
+            key = entry;
+          } else if (typeof entry === "object") {
+            propObj = entry;
+            key = propObj.title ?? propObj.name ?? propObj.originalName ?? propObj["block/title"] ?? propObj["db/ident"] ?? propObj[":db/ident"];
+          }
+
+          if (!key) continue;
+
+          let type: string | null = null;
+          if (propObj) {
+            type = extractType(propObj);
+          }
+
+          if (!type && logseq.Editor.getProperty) {
+            try {
+              const fullProp = await logseq.Editor.getProperty(key);
+              if (fullProp) {
+                type = extractType(fullProp);
+              }
+            } catch { /* ignore */ }
+          }
+
+          if (type === "node") {
+            nodeTypeProps.add(normalizePropertyName(key));
+          }
+        }
+      }
+    }
+
+    console.log(`[OutlineCanvas] Database-wide Discovery: ${nodeTypeProps.size} node-type properties detected: [${Array.from(nodeTypeProps).join(", ")}]`);
   } catch (err) {
     console.error("[OutlineCanvas] Failed to retrieve node type properties:", err);
   }

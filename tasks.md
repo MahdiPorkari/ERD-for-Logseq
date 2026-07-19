@@ -220,6 +220,16 @@ Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties 
 
 ## In Progress
 
+### Fix: Database-wide Property Schema Discovery (target v1.2.0)
+Replace failing `getAllProperties()`/`getProperty()` type-guessing implementation with a direct Datascript query `[:find (pull ?p [:db/ident :block/title :logseq.property/schema]) :where [?p :block/type "property"]]` for reliable node relationship property discovery.
+- [x] Primary query path implemented using `logseq.DB.datascriptQuery`.
+- [x] Extracted name from `:block/title` or `block/title` (with fallback to `:db/ident`), and normalized with `normalizePropertyName()`.
+- [x] Schema type 'node' parsed cleanly via existing `extractType()` function.
+- [x] Fallback to `getAllProperties()` and `getProperty()` implemented secondary to Datascript path.
+- [x] Added console diagnostic log showing N node-type properties detected.
+- [x] Updated unit tests in `src/adapter.database-wide.test.ts` to mock the Datascript query path.
+
+
 ### Refactor: Split `src/index.ts` (target v1.2.0)
 Behaviour-preserving decomposition of `src/index.ts` (724 lines, mixes 5+ concerns). Surfaced by the 2026-05-16 production-readiness pass. Should be its own commit / release branch, not bundled with v1.1.0.
 

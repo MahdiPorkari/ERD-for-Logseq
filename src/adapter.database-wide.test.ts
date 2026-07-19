@@ -449,26 +449,33 @@ describe("Database-wide Discovery Tests", () => {
   // 7. Handles various entity reference shapes (db/id, block/uuid, plain UUID) when defined as type: 'node'
   it("generic discovery: handles various entity reference shapes (db/id, block/uuid, plain UUID) when defined as type: 'node'", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            name: "ref-db-id",
-            ":logseq.property/schema": { type: "node" }
-          },
-          {
-            name: "ref-block-uuid",
-            ":logseq.property/schema": { type: "node" }
-          },
-          {
-            name: "ref-plain-uuid",
-            ":logseq.property/schema": { type: "node" }
-          },
-          {
-            name: "coincid-uuid",
-            ":logseq.property/schema": { type: "default" } // non-node type property
-          }
-        ]),
-        getProperty: vi.fn()
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":block/title": "ref-db-id",
+              ":logseq.property/schema": { ":type": "node" }
+            }
+          ],
+          [
+            {
+              ":block/title": "ref-block-uuid",
+              ":logseq.property/schema": { ":type": "node" }
+            }
+          ],
+          [
+            {
+              ":block/title": "ref-plain-uuid",
+              ":logseq.property/schema": { ":type": "node" }
+            }
+          ],
+          [
+            {
+              ":block/title": "coincid-uuid",
+              ":logseq.property/schema": { ":type": "default" }
+            }
+          ]
+        ])
       }
     });
 
@@ -536,22 +543,27 @@ describe("Database-wide Discovery Tests", () => {
   // 8. Plain non-reference values are not treated as traversable
   it("generic discovery: plain non-reference values are not treated as traversable", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            name: "text-prop",
-            ":logseq.property/schema": { type: "default" }
-          },
-          {
-            name: "num-prop",
-            ":logseq.property/schema": { type: "number" }
-          },
-          {
-            name: "bool-prop",
-            ":logseq.property/schema": { type: "checkbox" }
-          }
-        ]),
-        getProperty: vi.fn()
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":block/title": "text-prop",
+              ":logseq.property/schema": { ":type": "default" }
+            }
+          ],
+          [
+            {
+              ":block/title": "num-prop",
+              ":logseq.property/schema": { ":type": "number" }
+            }
+          ],
+          [
+            {
+              ":block/title": "bool-prop",
+              ":logseq.property/schema": { ":type": "checkbox" }
+            }
+          ]
+        ])
       }
     });
 
@@ -602,14 +614,15 @@ describe("Database-wide Discovery Tests", () => {
   // 9. Internal/system properties and tags are excluded from traversal
   it("generic discovery: internal/system properties and tags are excluded from traversal", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            name: "tags",
-            ":logseq.property/schema": { type: "node" }
-          }
-        ]),
-        getProperty: vi.fn()
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":block/title": "tags",
+              ":logseq.property/schema": { ":type": "node" }
+            }
+          ]
+        ])
       }
     });
 
@@ -663,17 +676,18 @@ describe("Database-wide Discovery Tests", () => {
   // 10. Fix shape detection for getAllProperties with colon-prefixed `:db/ident` and outer `type: "property"`
   it("generic discovery: handles colon-prefixed :db/ident and nested :logseq.property/schema while ignoring outer type: 'property'", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            ":db/ident": "assignee",
-            "type": "property", // Page discriminator, must be ignored!
-            ":logseq.property/schema": {
-              ":type": "node"
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":db/ident": "assignee",
+              "type": "property", // Page discriminator, must be ignored!
+              ":logseq.property/schema": {
+                ":type": "node"
+              }
             }
-          }
-        ]),
-        getProperty: vi.fn()
+          ]
+        ])
       }
     });
 
@@ -730,16 +744,17 @@ describe("Database-wide Discovery Tests", () => {
   // 11. Verify that synthetic nodes correctly carry their own independent custom properties
   it("generic discovery: synthetic nodes carry their own custom properties independent of the main page", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            ":db/ident": "assignee",
-            ":logseq.property/schema": {
-              ":type": "node"
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":db/ident": "assignee",
+              ":logseq.property/schema": {
+                ":type": "node"
+              }
             }
-          }
-        ]),
-        getProperty: vi.fn()
+          ]
+        ])
       }
     });
 
@@ -805,16 +820,17 @@ describe("Database-wide Discovery Tests", () => {
   // 12. Depth pruning after database-wide discovery correctly enforces maxDepth
   it("maxDepth pruning: successfully discovers deep relationships recursively first, then prunes the resulting expanded tree to maxDepth", async () => {
     vi.stubGlobal("logseq", {
-      Editor: {
-        getAllProperties: vi.fn().mockResolvedValue([
-          {
-            ":db/ident": "assignee",
-            ":logseq.property/schema": {
-              ":type": "node"
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([
+          [
+            {
+              ":db/ident": "assignee",
+              ":logseq.property/schema": {
+                ":type": "node"
+              }
             }
-          }
-        ]),
-        getProperty: vi.fn()
+          ]
+        ])
       }
     });
 
@@ -892,6 +908,75 @@ describe("Database-wide Discovery Tests", () => {
     const prunedB = prunedA.children[0];
     expect(prunedB.uuid).toBe(UUID_B);
     expect(prunedB.children).toHaveLength(0); // C and D are pruned away!
+
+    vi.unstubAllGlobals();
+  });
+
+  // 13. Fallback path works if Datascript query throws or returns empty
+  it("fallback path: correctly falls back to getAllProperties/getProperty when datascriptQuery returns empty", async () => {
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([]) // returns empty!
+      },
+      Editor: {
+        getAllProperties: vi.fn().mockResolvedValue([
+          {
+            ":db/ident": "assignee",
+            ":logseq.property/schema": {
+              ":type": "node"
+            }
+          }
+        ]),
+        getProperty: vi.fn()
+      }
+    });
+
+    const root: TreeNode = {
+      name: "Root",
+      depth: 0,
+      id: 0,
+      uuid: "root-uuid",
+      children: [
+        {
+          name: "Block A",
+          depth: 1,
+          id: 1,
+          uuid: UUID_A,
+          children: [],
+          refs: []
+        }
+      ],
+      refs: []
+    };
+
+    const blockFetcher = vi.fn(async (uuid: string) => {
+      if (uuid === UUID_A) {
+        return {
+          uuid: UUID_A,
+          ":user.property/assignee": UUID_B
+        };
+      }
+      if (uuid === UUID_B) {
+        return {
+          uuid: UUID_B,
+          content: "Block B"
+        };
+      }
+      return null;
+    });
+
+    const result = await expandDatabaseWide(
+      root,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = result.children[0];
+    expect(nodeA.children).toHaveLength(1);
+    expect(nodeA.children[0].uuid).toBe(UUID_B);
 
     vi.unstubAllGlobals();
   });
