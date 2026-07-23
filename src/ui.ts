@@ -9,6 +9,8 @@ const ICON_DOWNLOAD = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height
 
 const ICON_COPY = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M8 8m0 2a2 2 0 0 1 2 -2h8a2 2 0 0 1 2 2v8a2 2 0 0 1 -2 2h-8a2 2 0 0 1 -2 -2z"/><path d="M16 8v-2a2 2 0 0 0 -2 -2h-8a2 2 0 0 0 -2 2v8a2 2 0 0 0 2 2h2"/></svg>`;
 
+const ICON_REFRESH = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height="15" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor" fill="none" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 11a8.1 8.1 0 0 0 -15.5 -2m-.5 -4v4h4"/><path d="M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4"/></svg>`;
+
 /** Build the HTML for the main UI panel (injected into #app in the iframe) */
 export function buildUI(views: ViewDef[], activeView: ViewId): string {
   const viewButtons = views
@@ -27,6 +29,7 @@ export function buildUI(views: ViewDef[], activeView: ViewId): string {
       <div class="oc-toolbar">
         <div class="oc-views">${viewButtons}</div>
         <div class="oc-toolbar-right">
+          <button class="oc-ctrl oc-ctrl--icon" id="oc-refresh" title="Refresh index and re-render">${ICON_REFRESH}</button>
           <button class="oc-ctrl oc-ctrl--icon" id="oc-copy" title="Copy current view to clipboard">${ICON_COPY}</button>
           <button class="oc-ctrl oc-ctrl--icon" id="oc-export" title="Download current view as PNG">${ICON_DOWNLOAD}</button>
           <button class="oc-ctrl" id="oc-dock-toggle" title="Toggle docked/full-screen">⊟</button>

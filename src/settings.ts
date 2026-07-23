@@ -115,6 +115,7 @@ export async function registerSettings(): Promise<void> {
         "fish",
         "tmap",
         "erd",
+        "erd2",
       ],
       enumPicker: "select",
       default: DEFAULTS.defaultView,
