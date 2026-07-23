@@ -138,7 +138,8 @@ export type ViewId =
   | "fish"
   | "tmap"
   | "erd"
-  | "erd2";
+  | "erd2"
+  | "graph";
 
 /** View registry entry */
 export interface ViewDef {

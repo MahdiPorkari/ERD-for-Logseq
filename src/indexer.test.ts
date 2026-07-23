@@ -160,4 +160,42 @@ describe("BackgroundIndexer", () => {
     expect(nodeC.children).toHaveLength(0);
     expect(nodeC.refs).toContainEqual({ kind: "tag", targetUuid: BLOCK_A_UUID });
   });
+
+  it("builds flat whole-graph nodes and edges in buildGraphWide", async () => {
+    const indexer = new BackgroundIndexer();
+
+    indexer.pageNameMap.set("my active page", PAGE_UUID);
+    indexer.idMap.set(1, PAGE_UUID);
+    indexer.idMap.set(2, BLOCK_A_UUID);
+    indexer.idMap.set(3, BLOCK_B_UUID);
+
+    indexer.adjacencyGraph.set(PAGE_UUID, [
+      { targetId: BLOCK_A_UUID, edgeType: "parent-child" }
+    ]);
+    indexer.adjacencyGraph.set(BLOCK_A_UUID, [
+      { targetId: BLOCK_B_UUID, edgeType: "reference" }
+    ]);
+
+    indexer.entityCache.set(PAGE_UUID, { "block/uuid": PAGE_UUID, "block/title": "My Active Page" });
+    indexer.entityCache.set(BLOCK_A_UUID, { "block/uuid": BLOCK_A_UUID, "block/content": "Block A" });
+    indexer.entityCache.set(BLOCK_B_UUID, { "block/uuid": BLOCK_B_UUID, "block/content": "Block B" });
+
+    const result = await indexer.buildGraphWide();
+
+    // Verify all nodes participating are in the flat list
+    expect(result.nodes).toHaveLength(3);
+    const nodeUuids = result.nodes.map(n => n.uuid);
+    expect(nodeUuids).toContain(PAGE_UUID);
+    expect(nodeUuids).toContain(BLOCK_A_UUID);
+    expect(nodeUuids).toContain(BLOCK_B_UUID);
+
+    // Verify correct flat edges are extracted
+    expect(result.edges).toHaveLength(2);
+    expect(result.edges).toContainEqual({ sourceUuid: PAGE_UUID, targetUuid: BLOCK_A_UUID, edgeType: "parent-child" });
+    expect(result.edges).toContainEqual({ sourceUuid: BLOCK_A_UUID, targetUuid: BLOCK_B_UUID, edgeType: "reference" });
+
+    // Verify refs are populated on node objects
+    const pageNode = result.nodes.find(n => n.uuid === PAGE_UUID)!;
+    expect(pageNode.refs).toContainEqual({ kind: "parent-child", targetUuid: BLOCK_A_UUID });
+  });
 });

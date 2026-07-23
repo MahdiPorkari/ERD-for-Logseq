@@ -433,6 +433,103 @@ export class BackgroundIndexer {
 
     return rootNode;
   }
+
+  /**
+   * Builds the whole-graph data (all nodes and edges that have relationships).
+   */
+  public async buildGraphWide(
+    fetcher: (uuid: string) => Promise<string | null> = async () => null
+  ): Promise<{
+    nodes: TreeNode[];
+    edges: { sourceUuid: string; targetUuid: string; edgeType: EdgeType }[];
+  }> {
+    let localNextId = 0;
+    const tagProvider = new DefaultTagProvider(this.entityCache);
+    const idCache = new Map<number, string | null>();
+    const idResolver = async (id: number) => this.idMap.get(id) || null;
+
+    const participatingUuids = new Set<string>();
+    for (const [sourceUuid, edges] of this.adjacencyGraph.entries()) {
+      if (edges.length > 0) {
+        participatingUuids.add(sourceUuid);
+        for (const edge of edges) {
+          if (edge.targetId) {
+            participatingUuids.add(edge.targetId);
+          }
+        }
+      }
+    }
+
+    // Helper to build a TreeNode for a UUID using cached/extracted entity details
+    const createNode = async (uuid: string, depth: number): Promise<TreeNode> => {
+      const ent = this.entityCache.get(uuid);
+      let name = "(empty)";
+      let properties: { name: string; value: string }[] = [];
+      let tags: TagInfo[] = [];
+
+      if (ent) {
+        const rawText = ent[":block/content"] ?? ent["block/content"] ?? ent[":block/title"] ?? ent["block/title"] ?? "";
+        const resolved = await resolveNodeRefs(rawText, fetcher);
+        name = stripMarkdown(resolved) || "(empty)";
+        properties = await extractDisplayProperties(ent, idCache, idResolver, fetcher);
+        const extractedTags = await tagProvider.getTags(uuid);
+        tags = [...extractedTags];
+      } else {
+        const fetchedTitle = await fetcher(uuid);
+        if (fetchedTitle) {
+          name = stripMarkdown(fetchedTitle);
+        }
+      }
+
+      return {
+        name,
+        children: [],
+        depth,
+        id: localNextId++,
+        uuid,
+        properties,
+        tags,
+        refs: []
+      };
+    };
+
+    const nodes: TreeNode[] = [];
+    for (const uuid of participatingUuids) {
+      const node = await createNode(uuid, 1);
+      nodes.push(node);
+    }
+
+    const edgesList: { sourceUuid: string; targetUuid: string; edgeType: EdgeType }[] = [];
+    for (const [sourceUuid, edges] of this.adjacencyGraph.entries()) {
+      for (const edge of edges) {
+        if (edge.targetId) {
+          edgesList.push({
+            sourceUuid,
+            targetUuid: edge.targetId,
+            edgeType: edge.edgeType
+          });
+        }
+      }
+    }
+
+    // Populate refs on each node for compatibility with edges.ts / badges.ts overlays
+    for (const node of nodes) {
+      const edges = this.adjacencyGraph.get(node.uuid) || [];
+      for (const edge of edges) {
+        if (edge.targetId) {
+          if (!node.refs) node.refs = [];
+          if (!node.refs.some(r => r.targetUuid === edge.targetId && r.kind === edge.edgeType)) {
+            node.refs.push({ kind: edge.edgeType, targetUuid: edge.targetId });
+          }
+        }
+      }
+    }
+
+    return {
+      nodes,
+      edges: edgesList
+    };
+  }
 }
 
 export const globalIndexer = new BackgroundIndexer();
