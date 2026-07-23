@@ -19,6 +19,7 @@ import { layoutRightTree } from "./views/right-tree";
 import { layoutFishbone } from "./views/fishbone";
 import { layoutTreemap, treemapHitBoxes } from "./views/treemap";
 import { layoutERD } from "./views/erd";
+import { layoutGraph } from "./views/graph";
 
 const VIEWS: ViewDef[] = [
   { id: "tree", label: "Tree Chart", icon: "⎅", layout: layoutTreeChart },
@@ -31,6 +32,7 @@ const VIEWS: ViewDef[] = [
   { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
   { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
   { id: "erd2", label: "ERD v.2", icon: "⇿", layout: layoutERD },
+  { id: "graph", label: "Graph", icon: "🕸", layout: layoutGraph },
 ];
 
 // Plugin state
@@ -128,7 +130,7 @@ function composeElements(): void {
   const additionalSelected = getSelectedAdditionalRelationshipProperties();
   const allowedKinds = new Set<string>();
 
-  if (activeView === "erd2") {
+  if (activeView === "erd2" || activeView === "graph") {
     allowedKinds.add("reference");
     allowedKinds.add("tag");
     allowedKinds.add("property");
@@ -173,8 +175,8 @@ async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
 
-  if (activeView === "erd2") {
-    // ERD v.2 is pre-built, no depth flattening or expandDatabaseWide needed here
+  if (activeView === "erd2" || activeView === "graph") {
+    // ERD v.2 and Graph view are pre-built, no depth flattening or expandDatabaseWide needed here
     const view = VIEWS.find((v) => v.id === activeView)!;
     const result = view.layout(currentTree, settings.maxDepth);
 
@@ -273,6 +275,39 @@ function setFocus(uuid: string | null): void {
 
 async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
+
+  if (activeView === "graph") {
+    // Graph view is backed by background index (whole graph)
+    const result = await globalIndexer.buildGraphWide(defaultFetcher);
+
+    let nodes = result.nodes;
+    if (nodes.length > 500) {
+      console.warn(`[OutlineCanvas] Graph view is capped at 500 nodes. Found ${nodes.length} nodes.`);
+      if (typeof logseq !== "undefined" && logseq.UI && logseq.UI.showMsg) {
+        logseq.UI.showMsg("The whole-graph ERD exceeds 500 nodes. Showing first 500 nodes to preserve performance.", "warning");
+      }
+      nodes = nodes.slice(0, 500);
+    }
+
+    // Virtual Graph Root TreeNode
+    const root: TreeNode = {
+      name: "Virtual Graph Root",
+      children: nodes,
+      depth: 0,
+      id: 999999,
+      uuid: "virtual-graph-root",
+      properties: [],
+      tags: [],
+      refs: []
+    };
+
+    currentTree = root;
+    focusedUuid = null;
+    if (currentTree) {
+      await rebuildLayout();
+    }
+    return;
+  }
 
   if (activeView === "erd2") {
     // ERD v.2 is backed by background index
@@ -883,7 +918,7 @@ async function main(): Promise<void> {
   // Live updates via DB.onChanged (debounced)
   const offChanged = logseq.DB.onChanged(() => {
     if (!logseq.isMainUIVisible) return;
-    if (activeView === "erd2") return; // ERD v.2 does not auto-refresh on navigation or live edits
+    if (activeView === "erd2" || activeView === "graph") return; // ERD v.2/Graph does not auto-refresh on navigation or live edits
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       loadTree();

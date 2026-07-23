@@ -6,13 +6,13 @@ const NODE_GAP = 16;
 const COL_GAP = 60;
 const MIN_W = 155;
 
-const PROP_FONT_SIZE = 10;
-const PROP_PADDING_Y = 4;
-const DIVIDER_MARGIN_Y = 6;
-const NAME_GAP = 8;
+export const PROP_FONT_SIZE = 10;
+export const PROP_PADDING_Y = 4;
+export const DIVIDER_MARGIN_Y = 6;
+export const NAME_GAP = 8;
 
 /** Compute box size for any node, accounting for properties and tags */
-function nodeSize(n: TreeNode): {
+export function nodeSize(n: TreeNode): {
   w: number;
   h: number;
   headerH: number;
@@ -51,6 +51,140 @@ function nodeSize(n: TreeNode): {
   return { w, h, headerH, tagsValue, tagAreaH, propRows };
 }
 
+/** Draws the ERD node structure (box, tag row, divider, title, properties, dividers) */
+export function drawERDNode(
+  node: TreeNode,
+  x: number,
+  y: number,
+  w: number,
+  h: number,
+  headerH: number,
+  tagsValue: string,
+  propRows: { name: string; value: string; h: number }[],
+  isRoot: boolean,
+  isLeaf: boolean,
+  parentColorIndex: number
+): RenderElement[] {
+  const els: RenderElement[] = [];
+  const cy = y + h / 2;
+  const colorIdx = isRoot ? 0 : parentColorIndex;
+  const c = branchColor(colorIdx);
+
+  // Root glow
+  if (isRoot) {
+    els.push({ type: "dot", x: x + w / 2, y: cy, r: 60, color: theme().rootGlow1 });
+    els.push({ type: "dot", x: x + w / 2, y: cy, r: 45, color: theme().rootGlow2 });
+  }
+
+  // Node box
+  els.push({
+    type: "box", x, y, w, h,
+    fill: isRoot ? theme().rootBoxFill : (isLeaf ? c.leafFill : c.fill),
+    stroke: isRoot ? theme().rootStroke : (isLeaf ? c.leafStroke : c.stroke),
+    lw: isRoot ? 2.5 : (isLeaf ? 0.8 : 1.5),
+    rad: isRoot ? 14 : (isLeaf ? 6 : 8),
+    uuid: node.uuid,
+  });
+
+  const headerTextColor = isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text);
+
+  // Tags row at the top
+  const tagRowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
+  const tagCenterY = y + tagRowH / 2;
+
+  els.push({
+    type: "text", text: "Tags:", x: x + TEXT_PAD_X, y: tagCenterY,
+    color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
+    align: "left", baseline: "middle",
+  });
+
+  const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
+  const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+  const truncatedTags = truncateWithEllipsis(tagsValue, valueSpace, PROP_FONT_SIZE, 400);
+
+  els.push({
+    type: "text", text: truncatedTags, x: x + w - TEXT_PAD_X, y: tagCenterY,
+    color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
+    align: "right", baseline: "middle",
+  });
+
+  const tagDividerY = y + tagRowH + DIVIDER_MARGIN_Y;
+  els.push({
+    type: "line",
+    x1: x + 4, y1: tagDividerY, x2: x + w - 4, y2: tagDividerY,
+    color: theme().tableBorder || "#ccc", lw: 1,
+  });
+
+  const currentY = tagDividerY + DIVIDER_MARGIN_Y;
+
+  // Header Title
+  const titleLines = wrapText(node.name, w - TEXT_PAD_X * 2, isRoot ? 16 : 12, isRoot ? 700 : 600);
+  const titleLineH = (isRoot ? 16 : 12) * LINE_HEIGHT;
+  let textY = currentY + TEXT_PAD_Y + titleLineH / 2;
+
+  for (const line of titleLines) {
+    els.push({
+      type: "text",
+      text: line,
+      x: x + w / 2,
+      y: textY,
+      color: headerTextColor,
+      size: isRoot ? 16 : 12,
+      weight: isRoot ? 700 : 600,
+      align: "center",
+      baseline: "middle",
+    });
+    textY += titleLineH;
+  }
+
+  // Properties
+  if (propRows.length > 0) {
+    const headerDividerY = currentY + headerH + DIVIDER_MARGIN_Y;
+    els.push({
+      type: "line",
+      x1: x + 4, y1: headerDividerY, x2: x + w - 4, y2: headerDividerY,
+      color: theme().tableBorder || "#ccc", lw: 1,
+    });
+
+    let propY = headerDividerY + DIVIDER_MARGIN_Y;
+    propRows.forEach((row, i) => {
+      const rowTop = propY;
+      const rowBottom = propY + row.h;
+      const centerY = rowTop + row.h / 2;
+
+      if (i % 2 === 1 && theme().tableStripe) {
+         els.push({
+           type: "box", x: x + 1, y: rowTop, w: w - 2, h: row.h,
+           fill: theme().tableStripe, stroke: "transparent", lw: 0, rad: 0
+         });
+      }
+
+      els.push({
+        type: "text", text: `${row.name}:`, x: x + TEXT_PAD_X, y: centerY,
+        color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
+        align: "left", baseline: "middle",
+      });
+
+      const valueSpaceLocal = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+      const truncatedValue = truncateWithEllipsis(row.value, valueSpaceLocal, PROP_FONT_SIZE, 400);
+
+      els.push({
+        type: "text", text: truncatedValue, x: x + w - TEXT_PAD_X, y: centerY,
+        color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
+        align: "right", baseline: "middle",
+      });
+
+      els.push({
+        type: "line", x1: x + 4, y1: rowBottom, x2: x + w - 4, y2: rowBottom,
+        color: theme().tableBorder || "#ccc", lw: 1,
+      });
+      propY = rowBottom;
+    });
+  }
+
+  return els;
+}
+
 /** Recursively compute the total height a subtree needs */
 function subtreeHeight(node: TreeNode): number {
   if (!node.children.length) {
@@ -78,122 +212,25 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
     const cy = yStart + totalH / 2;
     const boxY = cy - h / 2;
     const isRoot = node.depth === 0;
-    const colorIdx = node.depth === 0 ? 0 : parentColorIndex;
+    const colorIdx = isRoot ? 0 : parentColorIndex;
     const c = branchColor(colorIdx);
     const isLeaf = node.children.length === 0;
 
-    // Root glow
-    if (isRoot) {
-      els.push({ type: "dot", x: x + w / 2, y: cy, r: 60, color: theme().rootGlow1 });
-      els.push({ type: "dot", x: x + w / 2, y: cy, r: 45, color: theme().rootGlow2 });
-    }
-
-    // Node box
-    els.push({
-      type: "box", x, y: boxY, w, h,
-      fill: isRoot ? theme().rootBoxFill : (isLeaf ? c.leafFill : c.fill),
-      stroke: isRoot ? theme().rootStroke : (isLeaf ? c.leafStroke : c.stroke),
-      lw: isRoot ? 2.5 : (isLeaf ? 0.8 : 1.5),
-      rad: isRoot ? 14 : (isLeaf ? 6 : 8),
-      uuid: node.uuid,
-    });
-
-    const headerTextColor = isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text);
-
-    // Tags row at the top
-    const tagRowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
-    const tagCenterY = boxY + tagRowH / 2;
-
-    els.push({
-      type: "text", text: "Tags:", x: x + TEXT_PAD_X, y: tagCenterY,
-      color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
-      align: "left", baseline: "middle",
-    });
-
-    const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
-    const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
-    const truncatedTags = truncateWithEllipsis(tagsValue, valueSpace, PROP_FONT_SIZE, 400);
-
-    els.push({
-      type: "text", text: truncatedTags, x: x + w - TEXT_PAD_X, y: tagCenterY,
-      color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
-      align: "right", baseline: "middle",
-    });
-
-    const tagDividerY = boxY + tagRowH + DIVIDER_MARGIN_Y;
-    els.push({
-      type: "line",
-      x1: x + 4, y1: tagDividerY, x2: x + w - 4, y2: tagDividerY,
-      color: theme().tableBorder || "#ccc", lw: 1,
-    });
-
-    let currentY = tagDividerY + DIVIDER_MARGIN_Y;
-
-    // Header Title
-    const titleLines = wrapText(node.name, w - TEXT_PAD_X * 2, isRoot ? 16 : 12, isRoot ? 700 : 600);
-    const titleLineH = (isRoot ? 16 : 12) * LINE_HEIGHT;
-    let textY = currentY + TEXT_PAD_Y + titleLineH / 2;
-
-    for (const line of titleLines) {
-      els.push({
-        type: "text",
-        text: line,
-        x: x + w / 2,
-        y: textY,
-        color: headerTextColor,
-        size: isRoot ? 16 : 12,
-        weight: isRoot ? 700 : 600,
-        align: "center",
-        baseline: "middle",
-      });
-      textY += titleLineH;
-    }
-
-    // Properties
-    if (propRows.length > 0) {
-      const headerDividerY = currentY + headerH + DIVIDER_MARGIN_Y;
-      els.push({
-        type: "line",
-        x1: x + 4, y1: headerDividerY, x2: x + w - 4, y2: headerDividerY,
-        color: theme().tableBorder || "#ccc", lw: 1,
-      });
-
-      let propY = headerDividerY + DIVIDER_MARGIN_Y;
-      propRows.forEach((row, i) => {
-        const rowTop = propY;
-        const rowBottom = propY + row.h;
-        const centerY = rowTop + row.h / 2;
-
-        if (i % 2 === 1 && theme().tableStripe) {
-           els.push({
-             type: "box", x: x + 1, y: rowTop, w: w - 2, h: row.h,
-             fill: theme().tableStripe, stroke: "transparent", lw: 0, rad: 0
-           });
-        }
-
-        els.push({
-          type: "text", text: `${row.name}:`, x: x + TEXT_PAD_X, y: centerY,
-          color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
-          align: "left", baseline: "middle",
-        });
-
-        const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
-        const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
-        const truncatedValue = truncateWithEllipsis(row.value, valueSpace, PROP_FONT_SIZE, 400);
-
-        els.push({
-          type: "text", text: truncatedValue, x: x + w - TEXT_PAD_X, y: centerY,
-          color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
-          align: "right", baseline: "middle",
-        });
-
-        els.push({
-          type: "line", x1: x + 4, y1: rowBottom, x2: x + w - 4, y2: rowBottom,
-          color: theme().tableBorder || "#ccc", lw: 1,
-        });
-        propY = rowBottom;
-      });
-    }
+    // Draw using our extracted helper
+    const nodeEls = drawERDNode(
+      node,
+      x,
+      boxY,
+      w,
+      h,
+      headerH,
+      tagsValue,
+      propRows,
+      isRoot,
+      isLeaf,
+      colorIdx
+    );
+    els.push(...nodeEls);
 
     if (node.uuid) nodeRectsByUuid.set(node.uuid, { x, y: boxY, w, h });
     maxX = Math.max(maxX, x + w);
