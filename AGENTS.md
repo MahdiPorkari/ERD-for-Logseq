@@ -1,8 +1,4 @@
-# AGENTS.md
-
-*Merged file — combines the repo-specific operational guide (originally `AGENTS.md`) with the Logseq DB Plugin API skill reference (originally uploaded as `AGENTS.md` but structured as a skill document with its own frontmatter). Nothing from either source was removed; headings were nested/renumbered so both documents coexist in one file. See Part 1 for day-to-day agent rules and Part 2 for the API reference.*
-
-## Part 1: Repository Operational Guide
+# Part 1: Repository Operational Guide
 
 
 Operational landmines and workflow expectations for agents in this repo. For architecture, modules, and commands, read `CLAUDE.md` — that's the discoverable side of things. **Don't duplicate** what's in `CLAUDE.md`, `README.md`, or `package.json` here.
@@ -17,7 +13,7 @@ For any non-trivial feature or bug fix:
 
 When user feedback mid-implementation introduces a new requirement, **pause and update the spec + tasks first**. Don't let the docs lag behind the code. The user has called this "backward" before; honor it.
 
-### Landmines
+## Landmines
 
 - **`scripts/logseq-smoke.sh` is broken.** Logseq removed `window.frontend.handler.plugin.load_plugin_from_web_url_BANG_`. The script's programmatic-install path no longer works. Don't run it expecting verification — fall back to asking the user to reload the plugin manually from Logseq desktop.
 
@@ -27,11 +23,84 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 
 - **The inline macro renderer (`{{renderer :outline-canvas}}`) intentionally omits relationship edges** — it shows badges (counts) only. This is a UX decision (no interaction surface in a static image; click image to open interactive). Don't "fix" the apparent inconsistency by adding edges to `offscreen.renderToDataURL`.
 
-### After code changes
+## ERD View: Node/Edge Rendering & Traversal Spec
+
+This section defines terminology, rendering rules, and traversal logic for the ERD canvas view. Treat this as authoritative for `erd.ts` / `adapter.ts` — do not hardcode a fixed traversal depth anywhere; see **Traversal Mechanism** below for the single source of truth on depth.
+
+### Names
+
+- **`node`** — a Logseq `page` or `block`, rendered as a compact rounded rectangle in the ERD canvas.
+  - **`source node`** — a `node` that owns a `property row` whose value is a `node reference`; the origin point of an `edge`.
+  - **`target node`** — the `node` that a `node reference` points to; the destination point of an `edge`.
+  - **`node reference`** — a `property value` that is an entity ref (a `:db/id` pointer to another `page` or `block`), rather than a plain string/number.
+- **`edge`** — a connector drawn between a `source node`'s `property row` and a `target node`'s title row, representing that the `property value` is a `node reference`.
+- **`source property row`** — the specific property row, inside a `source node`, whose `property value` is a `node reference`; this is where an `edge`'s source anchor attaches.
+- **`property`** — a key on a `node` (a Logseq block/page property) that holds a `property value`; rendered as its own row under a `node`'s title.
+- **`property value`** — the data stored for a given `property`: either a plain string/number (no edge drawn) or a `node reference` (edge drawn).
+
+> Note: a single `node` can act as both a `target node` (destination of one `edge`) and a `source node` (origin of another `edge`) simultaneously, once multi-hop traversal expands past the first level. The two roles are not mutually exclusive per node.
+
+### Nodes Inside the Canvas
+
+- **Overall shape:** each `node` must be a compact rounded rectangle.
+- **Row 1 (tags):** above the title row, add a row listing the tags the `node` has.
+- **Row 2 (title):** a strong title sits at the top — bold, slightly larger than the rest.
+- **Remaining rows (properties):** under the title row, add one row per `property` the `node` has, showing the property name and its `property value`.
+
+### Edges (Connectors)
+
+- **Source anchor**
+  - Location: right edge of a `property row`, where the `property value` is a `node reference`.
+  - Internal name: `source node` / `source property row`.
+- **Target anchor**
+  - Location: left edge of the title row of the `target node` — the entity the `source property row`'s value points to.
+- **Direction:** `source property row` → `target node`'s title row.
+- **Self-reference:** if a `source property row`'s `node reference` points back to its own parent `node`, draw a **loop edge** (source and target anchor on the same `node`). Never suppress this.
+- **Visibility — no scope limit:** every `property row` whose value is a `node reference` must produce a visible `edge`, regardless of whether the `target node` is currently loaded in the visible canvas area. If out of scope, fetch and render the `target node` (see Relationship Discovery) so the edge has a real endpoint. Never drop or defer an edge due to scope.
+- **Reference resolution:** resolve via `:db/id` (entity lookup, e.g. `getBlock(entityId)`). This works identically whether the target is a page or a block — no branching needed at this step.
+- **Label resolution (separate step — DOES branch):** once the target entity is resolved, its display label is read differently depending on `:block/type`:
+  - Page → `:block/name` or `:block/original-name`
+  - Block → `:block/title`
+  - This branch is unavoidable and must not be skipped or defaulted to one path — a likely source of failures in multi-hop chains if a page and a block appear at different hops.
+- **Cardinality:** if a single `property` holds multiple `node reference`s, emit one `edge` per reference, all sharing the same source anchor and fanning out to different target anchors.
+- **Filter rule:** only draw edges from `property row`s whose value resolves to an entity ref; skip rows holding a plain string/number.
+
+### Relationship Discovery
+
+- **Scope:** the whole Logseq DB graph — no depth limit, no visible-viewport limit.
+- **Rule (applies uniformly at every hop, not just the first two):** if a `node reference` exists as the `property value` of *any* `node` currently in the graph — whether that `node` is currently acting as a `source node` or a `target node` — independently fetch the `node reference`'s full data (tags, properties, etc.) from Logseq's API and render it as an individual `target node`.
+  - This rule is depth-agnostic. It applies identically to the original root, a 1-hop target, a 2-hop target, or any node discovered afterward. There is no special case for the first or second hop — see Traversal Mechanism for how this runs without hardcoding depth.
+- Continue applying the rule until every reachable `node` has been scanned and has no unfetched `node reference`s remaining among its properties.
+
+### Traversal Mechanism
+
+*How the Relationship Discovery rule must actually run. This is the single source of truth for depth — do not hardcode a fixed number of hops anywhere else in the implementation.*
+
+Maintain three in-memory structures (never write to a file):
+
+- `visited` — set of every `node`'s `:db/id` already fetched/expanded. This is the **cycle guard**: if `node A`'s `property value` is a `node reference` back to `node B`, and `node B` already references `node A`, `visited` prevents infinite re-fetching.
+- `queue` — `node reference`s discovered but not yet fetched/expanded.
+- `nodes` / `edges` — the accumulating graph data to render.
+
+Order of operations:
+
+1. Add newly discovered `node reference` to `queue` (do not fetch yet).
+2. Pull the next item off `queue`; if its `:db/id` is already in `visited`, skip it entirely — already expanded. (This is what stops the loop from running forever on a cycle, including the self-reference / loop-edge case.)
+3. Otherwise, fetch its full data via `getBlock(:db/id)`, add it to `nodes`, and mark it in `visited`.
+4. Scan the newly-fetched `node`'s own properties for further `node reference`s; add any found to `queue` and record the corresponding `edge`. Per the Visibility — No Scope Limit rule, this edge is recorded and rendered immediately, even before its target is fetched.
+5. Repeat from step 2 until `queue` is empty.
+
+**Termination:** the loop ends when `queue` is empty — every discovered `node reference`, at any depth, has been fetched and scanned. This is what "continue the loop" in Relationship Discovery concretely means, and it replaces any hardcoded "check the source node, then check the target node" special-casing.
+
+### Real-time Update
+
+*(Not yet defined — fill in before treating this section as final, or remove the heading.)*
+
+## After code changes
 
 The user runs the plugin from a Logseq desktop install pointed at `dist/`. After modifying any `src/**` file, **always `npm run build`** before telling the user to reload. The dev server (`npm run dev`) is for iframe-installed dev workflows, not the user's normal flow.
 
-### Debugging connector issues
+## Debugging connector issues
 
 The interactive canvas logs one diagnostic line per layout rebuild:
 
@@ -42,7 +111,7 @@ The interactive canvas logs one diagnostic line per layout rebuild:
 If a user reports "I don't see connectors," ask them to open DevTools (Cmd+Opt+I in Electron) and copy that line — `refs=0` means the adapter isn't extracting them; `refs>0` but `rects=0` means the view doesn't expose `nodeRectsByUuid`.
 
 
-## Part 2: Logseq DB Plugin API Skill Reference
+# Part 2: Logseq DB Plugin API Skill Reference
 
 > Original skill frontmatter (preserved as-is; was valid YAML frontmatter in the source skill file, shown here as a reference block since it's no longer at the top of a standalone file):
 >
@@ -52,11 +121,11 @@ If a user reports "I don't see connectors," ask them to open DevTools (Cmd+Opt+I
 > description: Essential knowledge for developing Logseq plugins for DB (database) graphs. Layered: (1) authoritative upstream docs mirrored from logseq/logseq master, (2) production-tested patterns from logseq-checklist v1.0.0, (3) related skills (Datascript schema, Electron debugging). Covers core APIs, event-driven updates, multi-layered tag detection, property iteration, advanced query patterns.
 > ```
 
-### Logseq DB Plugin API Skill
+## Logseq DB Plugin API Skill
 
 Comprehensive guidance for building Logseq plugins for **DB (database) graphs**, organized into three layers: authoritative upstream documentation, production-tested patterns, and related sibling skills.
 
-#### Overview
+### Overview
 
 This skill provides essential knowledge for building Logseq plugins that work with the new DB graph architecture. It covers:
 
@@ -65,7 +134,7 @@ This skill provides essential knowledge for building Logseq plugins that work wi
 - **Plugin Architecture**: File organization, settings, error handling, testing
 - **Common Pitfalls**: Validation errors, query issues, property dereferencing
 
-#### When to Use This Skill
+### When to Use This Skill
 
 Use this skill when developing Logseq plugins that:
 
@@ -76,7 +145,7 @@ Use this skill when developing Logseq plugins that:
 - Handle complex tag detection or property iteration
 - Require production-ready architecture patterns
 
-#### Key Differences: DB vs. Markdown Plugins
+### Key Differences: DB vs. Markdown Plugins
 
 | Aspect | Markdown Graphs | DB Graphs |
 |--------|----------------|-----------|
@@ -86,14 +155,14 @@ Use this skill when developing Logseq plugins that:
 | **Queries** | File-based attributes | Datalog / Database relationships |
 | **Property Access** | Text parsing | Namespaced keys (`:user.property/name`) |
 
-#### Prerequisites
+### Prerequisites
 
 - **Logseq**: 0.11.0+ (for full DB graph support)
 - **@logseq/libs**: 0.3.0+ (minimum for DB graphs)
 - **Node.js**: 18+ recommended
 - **Build tools**: Vite + vite-plugin-logseq
 
-#### Layer 1: Authoritative Upstream Docs
+### Layer 1: Authoritative Upstream Docs
 
 **Precedence**: Layer 1 is authoritative ground truth for API contracts. Layer 2 adds production-validated context and patterns not covered by official docs. When they conflict, **Layer 1 wins on API facts**; **Layer 2 wins on real-world pitfalls** (things that work on paper but fail in practice).
 
@@ -111,11 +180,11 @@ Use this skill when developing Logseq plugins that:
 
 **Refresh**: `bash scripts/sync-logseq-docs.sh` from repo root. Idempotent — no-op if upstream HEAD matches `.last-synced-sha`.
 
-#### Layer 2: Production Patterns
+### Layer 2: Production Patterns
 
 Battle-tested code from real-world plugin development. All patterns validated through [logseq-checklist v1.0.0](https://github.com/kerim/logseq-checklist).
 
-##### Unique contributions (not in official docs)
+#### Unique contributions (not in official docs)
 
 **[Tag Detection](./references/tag-detection.md)** — Reliable multi-layered detection
 Three-tier approach (content → datascript → properties) for maximum reliability when `block.properties.tags` fails.
@@ -127,7 +196,7 @@ Tag creation validation, property conflicts, query syntax mistakes, `or-join` va
 
 **Search for**: `validation errors`, `query returns no results`, `addTag not a function`
 
-##### Supplementary (may overlap with Layer 1 — cross-linked where relevant)
+#### Supplementary (may overlap with Layer 1 — cross-linked where relevant)
 
 **[Event Handling](./references/event-handling.md)** — DB.onChanged patterns
 Database change detection, datom filtering, debouncing strategies. Essential for plugins that maintain derived state.
@@ -154,7 +223,7 @@ File organization, settings registration, error handling, testing strategy, depl
 
 **Search for**: `file organization`, `settings schema`, `production patterns`
 
-#### Layer 3: Related Skills
+### Layer 3: Related Skills
 
 For specialized concerns, defer to sibling skills with their own activation triggers:
 
@@ -165,9 +234,9 @@ For specialized concerns, defer to sibling skills with their own activation trig
 | **`logseq-db-knowledge`** | Foundational DB graph concepts — use alongside this skill for understanding why DB graphs work the way they do. |
 | **`logseq-cli-skill`** | Logseq CLI usage — Datalog queries run from shell, useful for bulk operations outside plugins. |
 
-#### Quick Start
+### Quick Start
 
-##### 1. Project Setup
+#### 1. Project Setup
 
 ```bash
 mkdir my-logseq-plugin
@@ -178,7 +247,7 @@ pnpm add -D typescript vite vite-plugin-logseq @types/node
 mkdir src
 ```
 
-##### 2. Essential Files
+#### 2. Essential Files
 
 **src/index.ts** — Entry point:
 ```typescript
@@ -214,7 +283,7 @@ export default defineConfig({
 }
 ```
 
-##### 3. Development Workflow
+#### 3. Development Workflow
 
 ```bash
 pnpm run dev              # Watch mode
@@ -222,9 +291,9 @@ pnpm run build            # Production build
 # Load plugin: Settings → Plugins → Load unpacked plugin
 ```
 
-#### Core Concepts
+### Core Concepts
 
-##### Property Storage
+#### Property Storage
 
 Properties in DB graphs are stored as **namespaced keys** on block objects:
 
@@ -242,7 +311,7 @@ for (const [key, value] of Object.entries(block)) {
 
 **CRITICAL**: `block.properties.tags` and `block.properties[name]` are often unreliable. Use direct key access or iteration instead.
 
-##### Tag Detection
+#### Tag Detection
 
 Simple property checks fail. Use multi-layered detection — see [references/tag-detection.md](./references/tag-detection.md) for the full pattern.
 
@@ -259,7 +328,7 @@ const results = await logseq.DB.datascriptQuery(
 if (block.properties?.tags?.includes('mytag')) return true
 ```
 
-##### Event-Driven Updates
+#### Event-Driven Updates
 
 For plugins that maintain derived state:
 
@@ -276,7 +345,7 @@ if (logseq.DB?.onChanged) {
 
 See [references/event-handling.md](./references/event-handling.md) for debouncing strategies.
 
-##### Property Type Definition
+#### Property Type Definition
 
 Always define property types before using them:
 
@@ -294,9 +363,9 @@ await logseq.Editor.createPage('Item', {
 })
 ```
 
-#### Essential Workflows
+### Essential Workflows
 
-##### Creating Tagged Pages with Properties
+#### Creating Tagged Pages with Properties
 
 ```typescript
 // 1. Create tag
@@ -322,7 +391,7 @@ await logseq.Editor.createPage('My Item', {
 })
 ```
 
-##### Querying Tagged Items
+#### Querying Tagged Items
 
 ```typescript
 const query = `
@@ -351,7 +420,7 @@ const query = `
 
 See [references/queries-and-database.md](./references/queries-and-database.md) for advanced patterns.
 
-##### Responding to Database Changes
+#### Responding to Database Changes
 
 ```typescript
 const pendingUpdates = new Set<string>()
@@ -372,7 +441,7 @@ function handleDatabaseChanges(changeData: any): void {
 }
 ```
 
-#### Architecture Recommendations
+### Architecture Recommendations
 
 **File Structure**:
 ```
@@ -403,7 +472,7 @@ logseq.useSettingsSchema(settings)
 
 See [references/plugin-architecture.md](./references/plugin-architecture.md) for error handling, testing, and deployment.
 
-#### Common Mistakes to Avoid
+### Common Mistakes to Avoid
 
 1. **Wrong method names**: Use `addBlockTag()` not `addTag()`
 2. **Property access**: Don't rely on `block.properties.tags` — iterate namespaced keys
@@ -415,13 +484,13 @@ See [references/plugin-architecture.md](./references/plugin-architecture.md) for
 
 See [references/pitfalls-and-solutions.md](./references/pitfalls-and-solutions.md) for detailed solutions.
 
-#### Version Requirements
+### Version Requirements
 
 - **Logseq**: 0.11.0+ (for full DB graph support)
 - **@logseq/libs**: 0.3.0+ (minimum for DB graphs), 0.2.8+ recommended
 - **Graph type**: Database graphs only (not markdown/file-based graphs)
 
-#### Getting Help
+### Getting Help
 
 When encountering issues:
 
@@ -432,7 +501,7 @@ When encountering issues:
 5. **DevTools Console** — Cmd/Ctrl+Shift+I for runtime errors
 6. **Invoke `logseq-electron-debug` skill** (RCmerci) — for debugging Logseq itself
 
-#### Summary
+### Summary
 
 Three layers, in order of priority:
 
@@ -441,4 +510,3 @@ Three layers, in order of priority:
 3. **Layer 3 — Related skills** (logseq-schema, logseq-electron-debug, logseq-db-knowledge, logseq-cli-skill)
 
 Load the files you need for the current task. Layer 1 answers "what does the API do"; Layer 2 answers "what breaks in practice"; Layer 3 answers adjacent concerns that deserve their own skill activation.
-
