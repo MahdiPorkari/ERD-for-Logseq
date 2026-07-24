@@ -471,6 +471,7 @@ logseq.useSettingsSchema(settings)
 
 See [references/plugin-architecture.md](./references/plugin-architecture.md) for error handling, testing, and deployment.
 
+---
 ### Common Mistakes to Avoid
 
 1. **Wrong method names**: Use `addBlockTag()` not `addTag()`
@@ -483,12 +484,14 @@ See [references/plugin-architecture.md](./references/plugin-architecture.md) for
 
 See [references/pitfalls-and-solutions.md](./references/pitfalls-and-solutions.md) for detailed solutions.
 
+---
 ### Version Requirements
 
 - **Logseq**: 0.11.0+ (for full DB graph support)
 - **@logseq/libs**: 0.3.0+ (minimum for DB graphs), 0.2.8+ recommended
 - **Graph type**: Database graphs only (not markdown/file-based graphs)
 
+---
 ### Getting Help
 
 When encountering issues:
@@ -500,6 +503,7 @@ When encountering issues:
 5. **DevTools Console** — Cmd/Ctrl+Shift+I for runtime errors
 6. **Invoke `logseq-electron-debug` skill** (RCmerci) — for debugging Logseq itself
 
+---
 ### Summary
 
 Three layers, in order of priority:
