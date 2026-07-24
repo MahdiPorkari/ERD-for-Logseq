@@ -28,9 +28,9 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 ### Names
 
 - **`node`** — a Logseq `page` or `block`, rendered as a compact rounded rectangle in the ERD canvas.
-  - **`source node`** — a `node` that owns a `property row` whose value is a `node reference`; the origin point of an `edge`.
-  - **`target node`** — the `node` that a `node reference` points to; the destination point of an `edge`.
-  - **`node reference`** — a `property value` that is an entity ref (a `:db/id` pointer to another `page` or `block`), rather than a plain string/number.
+- **`source node`** — a `node` that owns a `property row` whose value is a `node reference`; the origin point of an `edge`.
+- **`target node`** — the `node` that a `node reference` points to; the destination point of an `edge`.
+- **`node reference`** — a `property value` that is an entity ref (a `:db/id` pointer to another `page` or `block`), rather than a plain string/number.
 - **`edge`** — a connector drawn between a `source node`'s `property row` and a `target node`'s title row, representing that the `property value` is a `node reference`.
 - **`source property row`** — the specific property row, inside a `source node`, whose `property value` is a `node reference`; this is where an `edge`'s source anchor attaches.
 - **`property`** — a key on a `node` (a Logseq block/page property) that holds a `property value`; rendered as its own row under a `node`'s title.
@@ -105,7 +105,7 @@ The interactive canvas logs one diagnostic line per layout rebuild:
 
 If a user reports "I don't see connectors," ask them to open DevTools (Cmd+Opt+I in Electron) and copy that line — `refs=0` means the adapter isn't extracting them; `refs>0` but `rects=0` means the view doesn't expose `nodeRectsByUuid`.
 
-
+---
 # Part 2: Logseq DB Plugin API Skill Reference
 
 > Original skill frontmatter (preserved as-is; was valid YAML frontmatter in the source skill file, shown here as a reference block since it's no longer at the top of a standalone file):
