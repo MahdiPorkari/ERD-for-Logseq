@@ -1,7 +1,5 @@
 # Part 1: Repository Operational Guide
-
-
-Operational landmines and workflow expectations for agents in this repo. For architecture, modules, and commands, read `CLAUDE.md` — that's the discoverable side of things. **Don't duplicate** what's in `CLAUDE.md`, `README.md`, or `package.json` here.
+> Operational landmines and workflow expectations for agents in this repo. For architecture, modules, and commands, read `CLAUDE.md` — that's the discoverable side of things. **Don't duplicate** what's in `CLAUDE.md`, `README.md`, or `package.json` here.
 
 ### Workflow expectation
 
@@ -9,7 +7,7 @@ For any non-trivial feature or bug fix:
 
 1. **Update `docs/feature-*.md`** (or write a new one) with the scope, decisions, and tradeoffs. Lock these before coding.
 2. **Update `tasks.md`** with a TDD-friendly checklist — each chunk testable, tests written first.
-3. **Implement TDD-style**: failing test → minimal code to pass → refactor. Enforce DRY, KISS, YAGNI.
+3. **Implement TDD-style**: failing test → minimal code to pass → refactor. Enforce DRY, KISS, YAGNI. **Execute `pnpm test` to autonomously verify failing and passing states.**
 
 When user feedback mid-implementation introduces a new requirement, **pause and update the spec + tasks first**. Don't let the docs lag behind the code. The user has called this "backward" before; honor it.
 
@@ -186,37 +184,41 @@ Battle-tested code from real-world plugin development. All patterns validated th
 **[Tag Detection](./references/tag-detection.md)** — Reliable multi-layered detection
 Three-tier approach (content → datascript → properties) for maximum reliability when `block.properties.tags` fails.
 
-**Search for**: `hasTag`, `block.properties.tags undefined`, `multi-layered`
+*   **Trigger:** **IF** implementing or debugging tag detection, **THEN READ** `./references/tag-detection.md`.
 
 **[Pitfalls & Solutions](./references/pitfalls-and-solutions.md)** — Errors and fixes discovered in production
 Tag creation validation, property conflicts, query syntax mistakes, `or-join` variable mismatches, method-name errors.
 
-**Search for**: `validation errors`, `query returns no results`, `addTag not a function`
+*   **Trigger:** **IF** encountering validation errors, empty query results, or missing methods, **THEN READ** `./references/pitfalls-and-solutions.md`.
+
+#### Supplementary (may overlap with Layer 1 — cross-linked where relevant)
 
 #### Supplementary (may overlap with Layer 1 — cross-linked where relevant)
 
 **[Event Handling](./references/event-handling.md)** — DB.onChanged patterns
 Database change detection, datom filtering, debouncing strategies. Essential for plugins that maintain derived state.
 
-**Search for**: `DB.onChanged`, `debouncing`, `transaction datoms`
+*   **Trigger:** **IF** handling database change detection or debouncing `DB.onChanged`, **THEN READ** `./references/event-handling.md`.
 
 **[Property Management](./references/property-management.md)** — Reading property values
 Iteration patterns for unknown property names, type-based detection, namespaced key access.
 
-**Search for**: `property iteration`, `namespaced keys`, `:user.property/`
+*   **Trigger:** **IF** iterating properties or accessing namespaced keys (`:user.property/`), **THEN READ** `./references/property-management.md`.
 
 **[Core APIs](./references/core-apis.md)** — Essential methods
 Tag/class management, page/block creation, property operations, icons, utilities.
 
-**Search for**: `createTag`, `addBlockTag`, `upsertProperty`, `createPage`
+*   **Trigger:** **IF** creating tags/pages or performing core property upserts, **THEN READ** `./references/core-apis.md`.
 
 **[Queries and Database](./references/queries-and-database.md)** — Datalog patterns
 Query syntax, common patterns, caching strategies, tag inheritance with `or-join`, `:block/title` vs `:block/name`.
 
-**Search for**: `datascriptQuery`, `datalog`, `caching`, `or-join`, `tag inheritance`
+*   **Trigger:** **IF** writing Datalog/Datascript queries or handling tag inheritance (`or-join`), **THEN READ** `./references/queries-and-database.md`.
 
 **[Plugin Architecture](./references/plugin-architecture.md)** — Best practices
 File organization, settings registration, error handling, testing strategy, deployment checklist.
+
+*   **Trigger:** **IF** organizing plugin structure, settings schemas, or error handling, **THEN READ** `./references/plugin-architecture.md`.
 
 **Search for**: `file organization`, `settings schema`, `production patterns`
 
