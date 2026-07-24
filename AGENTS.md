@@ -23,6 +23,7 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 
 - **The inline macro renderer (`{{renderer :outline-canvas}}`) intentionally omits relationship edges** — it shows badges (counts) only. This is a UX decision (no interaction surface in a static image; click image to open interactive). Don't "fix" the apparent inconsistency by adding edges to `offscreen.renderToDataURL`.
 
+---
 ## ERD View: Node/Edge Rendering & Traversal Spec
 > This section defines terminology, rendering rules, and traversal logic for the ERD canvas view. Treat this as authoritative for `erd.ts` / `adapter.ts` — do not hardcode a fixed traversal depth anywhere; see **Traversal Mechanism** below for the single source of truth on depth.
 
@@ -92,7 +93,6 @@ Order of operations:
 **Termination:** the loop ends when `queue` is empty — every discovered `node reference`, at any depth, has been fetched and scanned. This is what "continue the loop" in Relationship Discovery concretely means, and it replaces any hardcoded "check the source node, then check the target node" special-casing.
 
 ---
-
 ## After code changes
 
 The user runs the plugin from a Logseq desktop install pointed at `dist/`. After modifying any `src/**` file, **always `npm run build`** before telling the user to reload. The dev server (`npm run dev`) is for iframe-installed dev workflows, not the user's normal flow.
