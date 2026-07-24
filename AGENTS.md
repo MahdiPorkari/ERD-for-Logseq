@@ -76,9 +76,9 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 
 Maintain three in-memory structures (never write to a file):
 
-- `visited` — set of every `node`'s `:db/id` already fetched/expanded. This is the **cycle guard**: if `node A`'s `property value` is a `node reference` back to `node B`, and `node B` already references `node A`, `visited` prevents infinite re-fetching.
-- `queue` — `node reference`s discovered but not yet fetched/expanded.
-- `nodes` / `edges` — the accumulating graph data to render.
+1. `visited` — set of every `node`'s `:db/id` already fetched/expanded. This is the **cycle guard**: if `node A`'s `property value` is a `node reference` back to `node B`, and `node B` already references `node A`, `visited` prevents infinite re-fetching.
+2. `queue` — `node reference`s discovered but not yet fetched/expanded.
+3. `nodes` / `edges` — the accumulating graph data to render.
 
 Order of operations:
 
