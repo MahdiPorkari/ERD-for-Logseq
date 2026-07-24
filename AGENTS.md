@@ -71,8 +71,7 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 - Continue applying the rule until every reachable `node` has been scanned and has no unfetched `node reference`s remaining among its properties.
 
 ### Traversal Mechanism
-
-*How the Relationship Discovery rule must actually run. This is the single source of truth for depth — do not hardcode a fixed number of hops anywhere else in the implementation.*
+> *How the Relationship Discovery rule must actually run. This is the single source of truth for depth — do not hardcode a fixed number of hops anywhere else in the implementation.*
 
 Maintain three in-memory structures (never write to a file):
 
