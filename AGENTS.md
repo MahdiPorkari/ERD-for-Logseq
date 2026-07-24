@@ -91,9 +91,7 @@ Order of operations:
 
 **Termination:** the loop ends when `queue` is empty — every discovered `node reference`, at any depth, has been fetched and scanned. This is what "continue the loop" in Relationship Discovery concretely means, and it replaces any hardcoded "check the source node, then check the target node" special-casing.
 
-### Real-time Update
-
-*(Not yet defined — fill in before treating this section as final, or remove the heading.)*
+---
 
 ## After code changes
 
