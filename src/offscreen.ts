@@ -4,27 +4,10 @@ import { fitToView } from "./controller";
 import { filterIntraTreeRefs } from "./adapter";
 import { buildBadges } from "./views/badges";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
-import { layoutTreeChart } from "./views/tree-chart";
-import { layoutTreeTable } from "./views/tree-table";
-import { layoutRoadmapAlt, layoutRoadmapLinear } from "./views/roadmap";
-import { layoutMindMap } from "./views/mind-map";
-import { layoutRightTree } from "./views/right-tree";
-import { layoutFishbone } from "./views/fishbone";
-import { layoutTreemap } from "./views/treemap";
 import { layoutERD } from "./views/erd";
-import { layoutGraph } from "./views/graph";
 
 const VIEW_LAYOUTS: Record<ViewId, (root: TreeNode, maxDepth: number) => LayoutResult> = {
-  tree: layoutTreeChart,
-  table: layoutTreeTable,
-  roadmap_alt: layoutRoadmapAlt,
-  roadmap: layoutRoadmapLinear,
-  mind: layoutMindMap,
-  rtree: layoutRightTree,
-  fish: layoutFishbone,
-  tmap: layoutTreemap,
   erd: layoutERD,
-  erd2: layoutGraph,
 };
 
 /**
@@ -62,7 +45,7 @@ export function renderToDataURL(
   width: number = 800,
   height: number = 500
 ): string {
-  const layoutFn = VIEW_LAYOUTS[viewId] ?? layoutTreeChart;
+  const layoutFn = VIEW_LAYOUTS[viewId] ?? layoutERD;
   const filtered = filterIntraTreeRefs(tree);
   const result = layoutFn(filtered, maxDepth);
   // Static PNG: surface relationships via badges (counts) only — no edges

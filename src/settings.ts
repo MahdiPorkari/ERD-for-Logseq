@@ -21,7 +21,7 @@ export const DOCK_WIDTH_MAX = 70;
 export const RELPROP_PREFIX = "relprop_";
 
 export const DEFAULTS: PluginSettings = {
-  defaultView: "tree",
+  defaultView: "erd",
   maxDepth: 3,
   depthMode: "recursive",
   showEmptyBlocks: false,
@@ -102,26 +102,7 @@ export async function registerSettings(): Promise<void> {
   const customProps = await getCustomTagPropertyNames();
 
   const schema: any[] = [
-    {
-      key: "defaultView",
-      type: "enum",
-      enumChoices: [
-        "tree",
-        "table",
-        "roadmap_alt",
-        "roadmap",
-        "mind",
-        "rtree",
-        "fish",
-        "tmap",
-        "erd",
-        "erd2",
-      ],
-      enumPicker: "select",
-      default: DEFAULTS.defaultView,
-      title: "Default View",
-      description: "Which diagram view to show when opening OutlineCanvas.",
-    },
+
     {
       key: "maxDepth",
       type: "number",

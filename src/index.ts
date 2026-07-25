@@ -11,31 +11,14 @@ import { createState, fitToView, zoomIn, zoomOut, attachHandlers } from "./contr
 import { buildUI, STYLES, setActiveView, applyThemeToUI, updateDockButton, applyPlatformClass, updateFullscreenClass } from "./ui";
 import { setTheme } from "./colors";
 import { renderToDataURL, exportCurrentViewAsDataURL } from "./offscreen";
-import { layoutTreeChart } from "./views/tree-chart";
-import { layoutTreeTable } from "./views/tree-table";
-import { layoutRoadmapAlt, layoutRoadmapLinear } from "./views/roadmap";
-import { layoutMindMap } from "./views/mind-map";
-import { layoutRightTree } from "./views/right-tree";
-import { layoutFishbone } from "./views/fishbone";
-import { layoutTreemap, treemapHitBoxes } from "./views/treemap";
 import { layoutERD } from "./views/erd";
-import { layoutGraph } from "./views/graph";
 
 const VIEWS: ViewDef[] = [
-  { id: "tree", label: "Tree Chart", icon: "⎅", layout: layoutTreeChart },
-  { id: "table", label: "Tree Table", icon: "⊟", layout: layoutTreeTable },
-  { id: "roadmap_alt", label: "Roadmap ↕", icon: "⟿", layout: layoutRoadmapAlt },
-  { id: "roadmap", label: "Roadmap →", icon: "→", layout: layoutRoadmapLinear },
-  { id: "mind", label: "Mind Map", icon: "◎", layout: layoutMindMap },
-  { id: "rtree", label: "Right Tree", icon: "⊳", layout: layoutRightTree },
-  { id: "fish", label: "Fishbone", icon: "⟜", layout: layoutFishbone },
-  { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
   { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
-  { id: "erd2", label: "ERD v.2", icon: "⇿", layout: layoutGraph },
 ];
 
 // Plugin state
-let activeView: ViewId = "tree";
+let activeView: ViewId = "erd";
 let currentTree: TreeNode | null = null;
 let currentDisplayTree: TreeNode | null = null;
 let currentLayout: LayoutResult | null = null;
@@ -129,19 +112,12 @@ function composeElements(): void {
   const additionalSelected = getSelectedAdditionalRelationshipProperties();
   const allowedKinds = new Set<string>();
 
-  if (activeView === "erd2") {
-    allowedKinds.add("reference");
-    allowedKinds.add("tag");
-    allowedKinds.add("property");
-    allowedKinds.add("parent-child");
-  } else {
-    if (settings.showRelationships) {
-      allowedKinds.add("relates_to");
-      allowedKinds.add("depends_on");
-    }
-    if (activeView === "erd" && settings.showRelationships) {
-      for (const name of additionalSelected) allowedKinds.add(name);
-    }
+  if (settings.showRelationships) {
+    allowedKinds.add("relates_to");
+    allowedKinds.add("depends_on");
+  }
+  if (activeView === "erd" && settings.showRelationships) {
+    for (const name of additionalSelected) allowedKinds.add(name);
   }
 
   const wantOverlay = allowedKinds.size > 0 && !!rects;
@@ -173,30 +149,6 @@ function composeElements(): void {
 async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
-
-  if (activeView === "erd2") {
-    // ERD v.2 and Graph view are pre-built, no depth flattening or expandDatabaseWide needed here
-    const view = VIEWS.find((v) => v.id === activeView)!;
-    const result = view.layout(currentTree, settings.maxDepth);
-
-    currentDisplayTree = currentTree;
-    currentLayout = result;
-    composeElements();
-
-    let refCount = 0;
-    (function count(n: TreeNode): void {
-      refCount += n.refs?.length ?? 0;
-      for (const c of n.children) count(c);
-    })(currentTree);
-    console.debug(
-      `[OutlineCanvas] view=${activeView} focus=${focusedUuid ?? "none"} refs(intra-tree)=${refCount} rects=${result.nodeRectsByUuid?.size ?? 0}`
-    );
-
-    const { w, h } = getCanvasSize();
-    controllerState.transform = fitToView(result.bounds, w, h);
-    redraw();
-    return;
-  }
 
   const defaultIdResolver = async (id: number) => {
     try {
@@ -274,39 +226,6 @@ function setFocus(uuid: string | null): void {
 
 async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
-
-  if (activeView === "erd2") {
-    // ERD v.2 is backed by background index (whole graph)
-    const result = await globalIndexer.buildGraphWide(defaultFetcher);
-
-    let nodes = result.nodes;
-    if (nodes.length > 500) {
-      console.warn(`[OutlineCanvas] ERD v.2 is capped at 500 nodes. Found ${nodes.length} nodes.`);
-      if (typeof logseq !== "undefined" && logseq.UI && logseq.UI.showMsg) {
-        logseq.UI.showMsg("The whole-graph ERD exceeds 500 nodes. Showing first 500 nodes to preserve performance.", "warning");
-      }
-      nodes = nodes.slice(0, 500);
-    }
-
-    // Virtual Graph Root TreeNode
-    const root: TreeNode = {
-      name: "Virtual Graph Root",
-      children: nodes,
-      depth: 0,
-      id: 999999,
-      uuid: "virtual-graph-root",
-      properties: [],
-      tags: [],
-      refs: []
-    };
-
-    currentTree = root;
-    focusedUuid = null;
-    if (currentTree) {
-      await rebuildLayout();
-    }
-    return;
-  }
 
   currentTree = blockUuid
     ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, getSelectedAdditionalRelationshipProperties())
@@ -562,32 +481,7 @@ function setupCanvas(): void {
     }
   });
 
-  // Treemap breadcrumb hover
-  canvas.addEventListener("mousemove", (e) => {
-    if (activeView !== "tmap" || !treemapHitBoxes.length) return;
-    const bcEl = document.getElementById("oc-breadcrumb");
-    if (!bcEl) return;
 
-    const rect = canvas!.getBoundingClientRect();
-    const mx = (e.clientX - rect.left - controllerState.transform.ox) / controllerState.transform.scale;
-    const my = (e.clientY - rect.top - controllerState.transform.oy) / controllerState.transform.scale;
-
-    let found: (typeof treemapHitBoxes)[0] | null = null;
-    for (let i = treemapHitBoxes.length - 1; i >= 0; i--) {
-      const h = treemapHitBoxes[i];
-      if (mx >= h.x && mx <= h.x + h.w && my >= h.y && my <= h.y + h.h) {
-        found = h;
-        break;
-      }
-    }
-
-    if (found) {
-      bcEl.textContent = found.path.join(" → ");
-      bcEl.classList.add("oc-show");
-    } else {
-      bcEl.classList.remove("oc-show");
-    }
-  });
 
   // Delegated click handler on #app in capture phase. Covers both the
   // toolbar controls (by id) and the view switcher buttons (by class).
@@ -829,7 +723,7 @@ async function main(): Promise<void> {
 
     const blockUuid = payload.uuid;
     const settings = getSettings();
-    const viewId: ViewId = (viewArg?.trim() as ViewId) || settings.defaultView;
+    const viewId: ViewId = "erd";
 
     try {
       const block = await logseq.Editor.getBlock(blockUuid, { includeChildren: true });
@@ -864,7 +758,7 @@ async function main(): Promise<void> {
           <img src="${dataURL}" alt="OutlineCanvas diagram"
                data-on-click="openOutlineCanvasForBlock"
                data-block-uuid="${blockUuid}" />
-          <div class="oc-inline-label">◈ ${escapeHtml(VIEWS.find(v => v.id === viewId)?.label ?? "Tree Chart")} · Click to interact</div>
+          <div class="oc-inline-label">◈ ${escapeHtml(VIEWS.find(v => v.id === viewId)?.label ?? "ERD")} · Click to interact</div>
         </div>`,
       });
     } catch (err: unknown) {
@@ -891,7 +785,6 @@ async function main(): Promise<void> {
   // Live updates via DB.onChanged (debounced)
   const offChanged = logseq.DB.onChanged(() => {
     if (!logseq.isMainUIVisible) return;
-    if (activeView === "erd2") return; // ERD v.2/Graph does not auto-refresh on navigation or live edits
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       loadTree();
