@@ -128,17 +128,7 @@ export interface LayoutResult {
 }
 
 /** View identifiers */
-export type ViewId =
-  | "tree"
-  | "table"
-  | "roadmap_alt"
-  | "roadmap"
-  | "mind"
-  | "rtree"
-  | "fish"
-  | "tmap"
-  | "erd"
-  | "erd2";
+export type ViewId = "erd";
 
 /** View registry entry */
 export interface ViewDef {

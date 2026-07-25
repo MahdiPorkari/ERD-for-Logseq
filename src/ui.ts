@@ -13,21 +13,10 @@ const ICON_REFRESH = `<svg xmlns="http://www.w3.org/2000/svg" width="15" height=
 
 /** Build the HTML for the main UI panel (injected into #app in the iframe) */
 export function buildUI(views: ViewDef[], activeView: ViewId): string {
-  const viewButtons = views
-    .map(
-      (v) =>
-        `<button class="oc-vb${v.id === activeView ? " oc-vb--active" : ""}" data-view="${v.id}" title="${v.label}">
-          <span class="oc-vb-icon">${v.icon}</span>
-          <span class="oc-vb-label">${v.label}</span>
-        </button>`
-    )
-    .join("");
-
   return `
     <div class="oc-root">
       <div class="oc-resize-handle" id="oc-resize-handle" title="Drag to resize canvas"></div>
       <div class="oc-toolbar">
-        <div class="oc-views">${viewButtons}</div>
         <div class="oc-toolbar-right">
           <button class="oc-ctrl oc-ctrl--icon" id="oc-refresh" title="Refresh index and re-render">${ICON_REFRESH}</button>
           <button class="oc-ctrl oc-ctrl--icon" id="oc-copy" title="Copy current view to clipboard">${ICON_COPY}</button>
@@ -273,14 +262,7 @@ html, body, #app {
 `;
 
 /** Update the active view button in the toolbar */
-export function setActiveView(container: Element, viewId: ViewId): void {
-  container.querySelectorAll(".oc-vb").forEach((btn) => {
-    btn.classList.toggle(
-      "oc-vb--active",
-      btn.getAttribute("data-view") === viewId
-    );
-  });
-}
+export function setActiveView(container: Element, viewId: ViewId): void {}
 
 /** Apply the current theme mode to the UI CSS variables */
 export function applyThemeToUI(): void {
