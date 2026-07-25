@@ -1,3 +1,4 @@
+/** @vitest-environment jsdom */
 import { describe, it, expect } from "vitest";
 import type { TreeNode, Rect, CurveElement, TextElement } from "../types";
 import { buildEdgeElements, buildEdgeLabels } from "./edges";

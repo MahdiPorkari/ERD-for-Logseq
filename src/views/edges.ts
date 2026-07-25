@@ -1,5 +1,6 @@
 import type { TreeNode, RenderElement, Rect, RelKind, CurveElement } from "../types";
 import { theme, branchColor } from "../colors";
+import { nodeSize, PROP_FONT_SIZE, PROP_PADDING_Y, DIVIDER_MARGIN_Y } from "./erd";
 
 interface Edge {
   x1: number; y1: number;
@@ -8,66 +9,110 @@ interface Edge {
   x2: number; y2: number;
 }
 
-/**
- * Compute a bezier path between two rects. When the rects overlap horizontally
- * (vertically-stacked column case), anchor on the same right faces and arc
- * outward to the right so the curve goes *around* intermediate boxes rather
- * than slicing through them. Otherwise anchor on facing edges and use a
- * gentle bezier (same visual language as tree-branch connectors).
- */
-function pickEdgeGeometry(s: Rect, t: Rect): Edge {
-  const sCx = s.x + s.w / 2;
-  const sCy = s.y + s.h / 2;
-  const tCx = t.x + t.w / 2;
-  const tCy = t.y + t.h / 2;
-  const dx = tCx - sCx;
-  const dy = tCy - sCy;
+function getSourceAnchorOffset(node: TreeNode, refKind: string, rectH: number): number {
+  const { headerH, tagAreaH, h } = nodeSize(node);
+  const rowH = PROP_FONT_SIZE * 1.2 + PROP_PADDING_Y * 2;
 
-  // Horizontal overlap: source and target share x-range. A straight line
-  // between facing edges would strike through obstacles in the column.
-  const overlap = !(s.x + s.w < t.x || t.x + t.w < s.x);
+  let computedY = h / 2;
+
+  if (node.properties && node.properties.length > 0) {
+    const normalizedKind = refKind.toLowerCase().replace(/[_-]/g, " ").trim();
+    const idx = node.properties.findIndex(p => {
+      const normalizedPropName = p.name.toLowerCase().replace(/[_-]/g, " ").trim();
+      return normalizedPropName === normalizedKind;
+    });
+
+    if (idx !== -1) {
+      computedY = tagAreaH + headerH + DIVIDER_MARGIN_Y * 2 + idx * rowH + rowH / 2;
+    }
+  }
+
+  // Scale offset to fit the actual rect height (handles mock/test rects seamlessly)
+  return rectH * (computedY / h);
+}
+
+function getTargetAnchorOffset(node: TreeNode, rectH: number): number {
+  const { headerH, tagAreaH, h } = nodeSize(node);
+  const computedY = tagAreaH + headerH / 2;
+
+  // Scale offset to fit the actual rect height
+  return rectH * (computedY / h);
+}
+
+function pickERDEdgeGeometry(
+  source: Rect,
+  target: Rect,
+  sourceOffsetY: number,
+  targetOffsetY: number
+): Edge {
+  const isSelf = source.x === target.x && source.y === target.y;
+
+  // Check horizontal overlap
+  const overlap = !(source.x + source.w < target.x || target.x + target.w < source.x);
+  const dy = (target.y + targetOffsetY) - (source.y + sourceOffsetY);
+
+  let x1 = source.x + source.w;
+  let y1 = source.y + sourceOffsetY;
+  let x2 = target.x;
+  let y2 = target.y + targetOffsetY;
+
+  if (isSelf) {
+    // Self-reference / loop edge: bulge out to the right and loop back to the left
+    const bulge = 60;
+    return {
+      x1, y1,
+      cx1: x1 + bulge, cy1: y1,
+      cx2: x2 - bulge, cy2: y2,
+      x2, y2,
+    };
+  }
 
   if (overlap && Math.abs(dy) > 8) {
     // Stacked: same-side anchors (both right), bulge outward to the right.
-    const fromX = s.x + s.w;
-    const fromY = sCy;
-    const toX = t.x + t.w;
-    const toY = tCy;
+    x1 = source.x + source.w;
+    x2 = target.x + target.w;
     const bulge = Math.max(50, Math.abs(dy) * 0.45);
     return {
-      x1: fromX, y1: fromY,
-      cx1: fromX + bulge, cy1: fromY,
-      cx2: toX + bulge, cy2: toY,
-      x2: toX, y2: toY,
+      x1, y1,
+      cx1: x1 + bulge, cy1: y1,
+      cx2: x2 + bulge, cy2: y2,
+      x2, y2,
     };
   }
 
-  if (Math.abs(dx) >= Math.abs(dy)) {
-    // Horizontal-dominant: anchor on facing left/right faces, mid-x control points.
-    const fromX = dx >= 0 ? s.x + s.w : s.x;
-    const fromY = sCy;
-    const toX = dx >= 0 ? t.x : t.x + t.w;
-    const toY = tCy;
-    const midX = (fromX + toX) / 2;
+  // Horizontal/Vertical dominant curves
+  const sourceCx = source.x + source.w / 2;
+  const targetCx = target.x + target.w / 2;
+  const dxCenter = targetCx - sourceCx;
+  const dyCenter = (target.y + target.h / 2) - (source.y + source.h / 2);
+
+  if (!overlap && Math.abs(dxCenter) < Math.abs(dyCenter)) {
+    // Vertical-dominant (no x-overlap): anchor on top/bottom faces, mid-y controls.
+    const fromX = sourceCx;
+    const fromY = dyCenter >= 0 ? source.y + source.h : source.y;
+    const toX = targetCx;
+    const toY = dyCenter >= 0 ? target.y : target.y + target.h;
+    const midY = (fromY + toY) / 2;
     return {
       x1: fromX, y1: fromY,
-      cx1: midX, cy1: fromY,
-      cx2: midX, cy2: toY,
+      cx1: fromX, cy1: midY,
+      cx2: toX, cy2: midY,
       x2: toX, y2: toY,
     };
   }
 
-  // Vertical-dominant (no x-overlap): anchor on top/bottom faces, mid-y controls.
-  const fromX = sCx;
-  const fromY = dy >= 0 ? s.y + s.h : s.y;
-  const toX = tCx;
-  const toY = dy >= 0 ? t.y : t.y + t.h;
-  const midY = (fromY + toY) / 2;
+  // Horizontal-dominant: anchor on facing left/right faces, mid-x control points.
+  const isTargetToRight = target.x + target.w / 2 >= source.x + source.w / 2;
+  x1 = isTargetToRight ? source.x + source.w : source.x;
+  x2 = isTargetToRight ? target.x : target.x + target.w;
+
+  const controlOffset = Math.max(40, Math.abs(x2 - x1) * 0.5);
+
   return {
-    x1: fromX, y1: fromY,
-    cx1: fromX, cy1: midY,
-    cx2: toX, cy2: midY,
-    x2: toX, y2: toY,
+    x1, y1,
+    cx1: isTargetToRight ? x1 + controlOffset : x1 - controlOffset, cy1: y1,
+    cx2: isTargetToRight ? x2 - controlOffset : x2 + controlOffset, cy2: y2,
+    x2, y2,
   };
 }
 
@@ -84,8 +129,14 @@ const LABEL_H = 16;
 const LABEL_PAD_X = 7;
 const LABEL_CHAR_W = LABEL_FONT_SIZE * 0.62; // IBM Plex Mono approx
 
-function makeEdge(s: Rect, t: Rect, kind: RelKind): CurveElement {
-  const g = pickEdgeGeometry(s, t);
+function makeEdge(
+  source: Rect,
+  target: Rect,
+  kind: RelKind,
+  sourceOffsetY: number,
+  targetOffsetY: number
+): CurveElement {
+  const g = pickERDEdgeGeometry(source, target, sourceOffsetY, targetOffsetY);
   const t_ = theme();
 
   if (kind === "parent-child") {
@@ -164,6 +215,12 @@ export function buildEdgeElements(
   if (focusedUuid === null) return [];
   const els: RenderElement[] = [];
 
+  const nodesByUuid = new Map<string, TreeNode>();
+  (function index(n: TreeNode) {
+    if (n.uuid) nodesByUuid.set(n.uuid, n);
+    for (const c of n.children) index(c);
+  })(root);
+
   (function walk(node: TreeNode): void {
     if (node.uuid && node.refs && node.refs.length) {
       const source = rectsByUuid.get(node.uuid);
@@ -175,7 +232,11 @@ export function buildEdgeElements(
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
 
-          els.push(makeEdge(source, target, ref.kind));
+          const targetNode = nodesByUuid.get(ref.targetUuid);
+          const targetOffsetY = targetNode ? getTargetAnchorOffset(targetNode, target.h) : (target.h / 2);
+          const sourceOffsetY = getSourceAnchorOffset(node, ref.kind, source.h);
+
+          els.push(makeEdge(source, target, ref.kind, sourceOffsetY, targetOffsetY));
         }
       }
     }
@@ -200,6 +261,12 @@ export function buildEdgeLabels(
   const els: RenderElement[] = [];
   const t_ = theme();
 
+  const nodesByUuid = new Map<string, TreeNode>();
+  (function index(n: TreeNode) {
+    if (n.uuid) nodesByUuid.set(n.uuid, n);
+    for (const c of n.children) index(c);
+  })(root);
+
   (function walk(node: TreeNode): void {
     if (node.uuid && node.refs && node.refs.length) {
       const source = rectsByUuid.get(node.uuid);
@@ -222,7 +289,11 @@ export function buildEdgeLabels(
             continue;
           }
 
-          const g = pickEdgeGeometry(source, target);
+          const targetNode = nodesByUuid.get(ref.targetUuid);
+          const targetOffsetY = targetNode ? getTargetAnchorOffset(targetNode, target.h) : (target.h / 2);
+          const sourceOffsetY = getSourceAnchorOffset(node, ref.kind, source.h);
+
+          const g = pickERDEdgeGeometry(source, target, sourceOffsetY, targetOffsetY);
           const mid = bezierMidpoint(g);
           const label = ref.kind;
           const w = label.length * LABEL_CHAR_W + LABEL_PAD_X * 2;
