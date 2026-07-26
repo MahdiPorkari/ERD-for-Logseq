@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from "vitest";
-import { expandDatabaseWide, expandOutOfScopeRefs, flattenDeep, expandRelationships } from "./adapter";
+import { flattenDeep, expandRelationships } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -16,52 +16,7 @@ describe("Database-wide Discovery Tests", () => {
     getTags: vi.fn(async () => [])
   };
 
-  // 1. Regression: Calling expandOutOfScopeRefs behaves as before (relates_to/depends_on are excluded).
-  it("regression: expandOutOfScopeRefs behaves as before, excluding relates_to and depends_on", async () => {
-    const root: TreeNode = {
-      name: "Root",
-      depth: 0,
-      id: 0,
-      uuid: "root-uuid",
-      children: [
-        {
-          name: "Block A",
-          depth: 1,
-          id: 1,
-          uuid: UUID_A,
-          children: [],
-          refs: [
-            { kind: "relates_to", targetUuid: UUID_B },
-            { kind: "rel_custom", targetUuid: UUID_C }
-          ]
-        }
-      ],
-      refs: []
-    };
 
-    const blockFetcher = vi.fn(async (uuid: string) => {
-      if (uuid === UUID_B) return { uuid: UUID_B, content: "Block B" };
-      if (uuid === UUID_C) return { uuid: UUID_C, content: "Block C" };
-      return null;
-    });
-
-    const result = await expandOutOfScopeRefs(
-      root,
-      ["rel_custom"],
-      fetcher,
-      idResolver,
-      tagProvider,
-      blockFetcher
-    );
-
-    const sourceNode = result.children[0];
-    // B (relates_to) is NOT expanded (so it's not a child, and ref is kept).
-    // C (rel_custom) IS expanded (so it's a child, and ref is removed).
-    expect(sourceNode.children).toHaveLength(1);
-    expect(sourceNode.children[0].uuid).toBe(UUID_C);
-    expect(sourceNode.refs).toHaveLength(1);
-    expect(sourceNode.refs![0].kind).toBe("relates_to");
-  });
 
   // 2. Multi-hop discovery: chains A->B->C->D linked via custom relationship property
   it("multi-hop discovery: recursively follows references A->B->C->D", async () => {
@@ -109,7 +64,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -179,7 +134,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -278,7 +233,7 @@ describe("Database-wide Discovery Tests", () => {
     // Set maxNodes to 2.
     // The chain is A -> B -> C -> D -> E.
     // Discovery should add B and C, but stop before adding D or E.
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -306,7 +261,7 @@ describe("Database-wide Discovery Tests", () => {
   });
 
   // 5. relates_to/depends_on are included in traversal
-  it("relates_to and depends_on are included by default in expandDatabaseWide", async () => {
+  it("relates_to and depends_on are included by default in expandRelationships", async () => {
     const root: TreeNode = {
       name: "Root",
       depth: 0,
@@ -344,7 +299,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -411,10 +366,10 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    // 6a. Calling flattenDeep(tree, 3, "recursive") then expandDatabaseWide on pruned result
+    // 6a. Calling flattenDeep(tree, 3, "recursive") then expandRelationships on pruned result
     // does NOT find or expand the deep ref because flattenDeep at maxDepth=3 deletes everything at depth >= 2
     const pruned = flattenDeep(tree, 3, "recursive");
-    const resultPruned = await expandDatabaseWide(
+    const resultPruned = await expandRelationships(
       pruned,
       fetcher,
       idResolver,
@@ -427,8 +382,8 @@ describe("Database-wide Discovery Tests", () => {
     const grandchildPruned = resultPruned.children[0].children[0];
     expect(grandchildPruned.children).toHaveLength(0); // Great-grandchild is pruned away entirely!
 
-    // 6b. Calling expandDatabaseWide directly on un-pruned tree DOES find and expand it
-    const resultUnpruned = await expandDatabaseWide(
+    // 6b. Calling expandRelationships directly on un-pruned tree DOES find and expand it
+    const resultUnpruned = await expandRelationships(
       tree,
       fetcher,
       idResolver,
@@ -519,7 +474,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       mockIdResolver,
@@ -597,7 +552,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -659,7 +614,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -725,7 +680,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -793,7 +748,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -879,7 +834,7 @@ describe("Database-wide Discovery Tests", () => {
     });
 
     // 12a. Expand database wide first (independent of pruning)
-    const expanded = await expandDatabaseWide(
+    const expanded = await expandRelationships(
       root,
       fetcher,
       idResolver,
@@ -965,7 +920,7 @@ describe("Database-wide Discovery Tests", () => {
       return null;
     });
 
-    const result = await expandDatabaseWide(
+    const result = await expandRelationships(
       root,
       fetcher,
       idResolver,

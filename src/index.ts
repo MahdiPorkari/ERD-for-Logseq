@@ -1,7 +1,7 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
 import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
-import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs, expandDatabaseWide } from "./adapter";
+import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandRelationships } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { globalIndexer } from "./indexer";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
@@ -214,8 +214,8 @@ async function rebuildLayout(): Promise<void> {
   const tagProvider = new DefaultTagProvider();
 
   let tree: TreeNode;
-  if (activeView === "erd" && settings.showRelationships && settings.databaseWideDiscovery) {
-    const expanded = await expandDatabaseWide(
+  if (activeView === "erd" && settings.showRelationships) {
+    const expanded = await expandRelationships(
       currentTree,
       defaultFetcher,
       defaultIdResolver,
@@ -225,18 +225,7 @@ async function rebuildLayout(): Promise<void> {
     );
     tree = flattenDeep(expanded, settings.maxDepth, settings.depthMode);
   } else {
-    const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
-    tree = pruned;
-    if (activeView === "erd" && settings.showRelationships) {
-      tree = await expandOutOfScopeRefs(
-        pruned,
-        getSelectedAdditionalRelationshipProperties(),
-        defaultFetcher,
-        defaultIdResolver,
-        tagProvider,
-        blockFetcher
-      );
-    }
+    tree = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
   }
 
   if (settings.showRelationships) {

@@ -11,7 +11,6 @@ export interface PluginSettings {
   animateViewSwitch: boolean;
   showRelationships: boolean;
   showRelationshipLabels: boolean;
-  databaseWideDiscovery: boolean;
   dockBehavior: DockBehavior;
   dockWidth: number;
 }
@@ -28,7 +27,6 @@ export const DEFAULTS: PluginSettings = {
   animateViewSwitch: true,
   showRelationships: true,
   showRelationshipLabels: false,
-  databaseWideDiscovery: false,
   dockBehavior: "mirror",
   dockWidth: 40,
 };
@@ -172,18 +170,6 @@ export async function registerSettings(): Promise<void> {
         "Display the property name ('depends_on' / 'relates_to') as a small pill at the midpoint of each connector. Useful as a visual cue at first; turn off once the line styles are familiar.",
     },
     {
-      key: "databaseWideDiscovery",
-      type: "boolean",
-      default: DEFAULTS.databaseWideDiscovery,
-      title: "Database-wide Discovery",
-      description:
-        "ERD view only. When enabled, relationship traversal is not limited " +
-        "to the current page: the diagram recursively follows any user property " +
-        "configured with the database schema type 'node' containing page or block " +
-        "references across the entire graph until no further references are found. " +
-        "Can be slow on large graphs.",
-    },
-    {
       key: "dockBehavior",
       type: "enum",
       enumChoices: ["mirror", "overlay"],
@@ -243,9 +229,6 @@ export function getSettings(): PluginSettings {
     showRelationshipLabels:
       (logseq.settings?.showRelationshipLabels as boolean) ??
       DEFAULTS.showRelationshipLabels,
-    databaseWideDiscovery:
-      (logseq.settings?.databaseWideDiscovery as boolean) ??
-      DEFAULTS.databaseWideDiscovery,
     dockBehavior:
       (logseq.settings?.dockBehavior as DockBehavior) ?? DEFAULTS.dockBehavior,
     dockWidth: Math.max(

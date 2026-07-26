@@ -12,6 +12,17 @@ Ran `/production-readiness` after the dock-mode rework. Baseline clean: 64 tests
 
 ## Completed (unreleased)
 
+### Feature: Unified ERD traversal (completed 2026-05-16)
+The single/multi-hop traversal split is completely gone, and multi-hop discovery is now always-on in the ERD view when relationships are enabled. Retires and removes the deprecated `databaseWideDiscovery` setting.
+- [x] TDD Checklist for `expandRelationships`:
+  - [x] queue-based BFS with no depth cap traversing multiple hops (A -> B -> C -> D)
+  - [x] per-element array ref detection at every hop (not just the first hop)
+  - [x] self-reference on a block produces a loop edge, not a dropped edge (retains self-ref in `refs`)
+  - [x] already-visited target node keeps the edge as a reference rather than re-fetching (visited check preserves `NodeRef`)
+  - [x] safely terminates and logs warning when hitting the `maxNodes` budget (e.g. 500)
+  - [x] works with default properties (`relates_to` and `depends_on`) out-of-the-box
+  - [x] correctly ignores internal and system properties (e.g., `:block/tags`, `:user.property/tags`)
+
 ### Feature: dockWidth setting + drag handle (2026-05-16)
 Users couldn't trade canvas width for sidebar room. Added a live drag handle and a persisted vw value.
 - [x] New `dockWidth` setting (vw, default 40, clamped 20–70) drives both the iframe width and the host `margin-right`
@@ -219,16 +230,6 @@ Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties 
 - [x] CHANGELOG entry under `[Unreleased]`
 
 ## In Progress
-
-### Feature: Unified ERD traversal (target v1.2.0)
-- [ ] TDD Checklist for `expandRelationships`:
-  - [ ] queue-based BFS with no depth cap traversing multiple hops (A -> B -> C -> D)
-  - [ ] per-element array ref detection at every hop (not just the first hop)
-  - [ ] self-reference on a block produces a loop edge, not a dropped edge (retains self-ref in `refs`)
-  - [ ] already-visited target node keeps the edge as a reference rather than re-fetching (visited check preserves `NodeRef`)
-  - [ ] safely terminates and logs warning when hitting the `maxNodes` budget (e.g. 500)
-  - [ ] works with default properties (`relates_to` and `depends_on`) out-of-the-box
-  - [ ] correctly ignores internal and system properties (e.g., `:block/tags`, `:user.property/tags`)
 
 ### Fix: Database-wide Property Schema Discovery (target v1.2.0)
 Replace failing `getAllProperties()`/`getProperty()` type-guessing implementation with a direct Datascript query `[:find (pull ?p [:db/ident :block/title :logseq.property/schema]) :where [?p :block/type "property"]]` for reliable node relationship property discovery.
