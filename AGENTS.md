@@ -25,70 +25,143 @@ When user feedback mid-implementation introduces a new requirement, **pause and 
 ## ERD View: Node/Edge Rendering & Traversal Spec
 > This section defines terminology, rendering rules, and traversal logic for the ERD canvas view. Treat this as authoritative for `erd.ts` / `adapter.ts` — do not hardcode a fixed traversal depth anywhere; see **Traversal Mechanism** below for the single source of truth on depth.
 
-### Names
+- ### Names
+	- `node` a.k.a. entity
+		- a Logseq `page` or `block`
+		- Note: a single `node` can simultaneously act as a `target node` (the destination of one `edge`) and a `source node` (the origin of another `edge`) once multi-hop traversal expands past the first level. The two roles are not mutually exclusive per node.
+	- `source node`:
+		- a `node` that owns a `property row` whose value is a `node reference` — the origin point of an `edge`
+	- `target node`
+		- the `node` that a `node reference` points to — the destination point of an `edge`
+	- `node reference`:
+		- a `property value` that is an entity ref (a `:db/id` pointer to another `page` or `block`), rather than a plain string/number
+	- `edge`:
+		- a connector drawn between a `source node`'s `property row` and a `target node`'s title row, representing that the `property value` is a `node reference`
+	- `source property row`:
+		- the specific property row, inside a `source node`, whose `property value` is a `node reference` — this is where an `edge`'s source anchor attaches
+	- `property`:
+		- a key on a `node` (e.g. a Logseq block/page property) that holds a `property value`; rendered as its own row under a `node`'s title
+	- `property value`:
+		- the data stored for a given `property` — either a plain string/number (no edge drawn) or a `node reference` (edge drawn)
+		- **Detection rule (do not skip):** a `property value` can arrive as a single scalar, a single entity ref, or an **array** (cardinality-many property). Never classify by container type alone.
+			- If the value is a plain scalar (string/number/boolean) → not a `node reference`.
+			- If the value is a single object/entity-ref shape → it IS a `node reference`.
+			- If the value is an **array**, do NOT treat the array itself as "a plain multi-value property" — inspect **every element individually**. Any element that is an entity-ref shape is its own `node reference` and must produce its own `edge` (see Cardinality, below). An array is only "plain" if **all** of its elements are plain scalars.
+			- This per-element check must run identically at every hop — a reference buried inside an array at hop 2+ is exactly as valid as a scalar reference at hop 1, and skipping this check is a likely cause of nodes silently disappearing a few hops in.
+-
+- ### Inside the Canvas: Nodes
+	- #### Overall Node Shape
+		- Each `node` must be a rounded rectangle.
+	- #### Overall Rows Order
+		- Tag Row
+		- Title Row
+		- Property Rows
+	- #### Tag Rows
+		- Above the title row of any `node`, add a row including the tags which the `node` has.
+		- The tag row must have two columns:
+			- Left Column:
+				- Content: the word "Tags"
+				- Alignment: left-aligned
+			- Right Column:
+				- Content:  the tags which the `node` has.
+				- Alignment: right-aligned
+					- If a value exceeds the available horizontal space:
+						- Wrap the value onto additional lines within the same property row.Increase the entity card's height as needed to accommodate the wrapped text.
+						- Increase the entity card's height as needed to accommodate the wrapped text.
+						- do not truncate property values.
+	- #### Title Rows
+		- Alignment: centered
+		- Style: bold
+		- Size: slightly larger than the rest.
+	- #### Property Rows
+	  > Under the title row of any `node`, add a row (including the property and its value) per each property a `node` has.  
+		- Property rows must have two columns:
+			- Left Column:
+				- Content: `property name`
+				- Alignment: left-aligned
+			- Right Column:
+				- Content: `property value`s
+				- Alignment: left-aligned
+					- If a value exceeds the available horizontal space:
+						- Wrap the value onto additional lines within the same property row.Increase the entity card's height as needed to accommodate the wrapped text.
+						- Increase the entity card's height as needed to accommodate the wrapped text.
+						- do not truncate property values.
+	- #### `Target Node` Resolution
+		- Fetch the full entity via `:db/id` (entity lookup) — this works identically whether the target is a page or a block; no branching needed at this step.
+		- **This is not a separate fetch path.** Resolving a `target node` for display purposes and expanding it for `Relationship Discovery & Traversal` are the SAME entity lookup and must go through the SAME pipeline (see `Relationship Discovery & Traversal: Algorithm` → `Order of Operations`). Rendering a node's label must never happen through a resolution-only shortcut that skips adding it to `visited` and scanning its own properties — a node that is only ever "resolved for label" and never "expanded" will render correctly at its own hop but produce no further hops beneath it.
+		- ##### Title Field Selection
+		  >			* Separate step — Does branch
+			* Once the `target node` is resolved, its display label is read differently depending on `:block/type`.
+			* This branch is unavoidable and must not be skipped or defaulted to one path — it's a likely source of failures in multi-hop chains if a page and a block appear at different hops
 
-- **`node`** — a Logseq `page` or `block`, rendered as a compact rounded rectangle in the ERD canvas.
-- **`source node`** — a `node` that owns a `property row` whose value is a `node reference`; the origin point of an `edge`.
-- **`target node`** — the `node` that a `node reference` points to; the destination point of an `edge`.
-- **`node reference`** — a `property value` that is an entity ref (a `:db/id` pointer to another `page` or `block`), rather than a plain string/number.
-- **`edge`** — a connector drawn between a `source node`'s `property row` and a `target node`'s title row, representing that the `property value` is a `node reference`.
-- **`source property row`** — the specific property row, inside a `source node`, whose `property value` is a `node reference`; this is where an `edge`'s source anchor attaches.
-- **`property`** — a key on a `node` (a Logseq block/page property) that holds a `property value`; rendered as its own row under a `node`'s title.
-- **`property value`** — the data stored for a given `property`: either a plain string/number (no edge drawn) or a `node reference` (edge drawn).
+			- If the entity is a `page` → use `:block/name` or `:block/original-name`
+			- If the entity is a regular `block` → use `:block/title`
 
-> Note: a single `node` can act as both a `target node` (destination of one `edge`) and a `source node` (origin of another `edge`) simultaneously, once multi-hop traversal expands past the first level. The two roles are not mutually exclusive per node.
-
-### Nodes Inside the Canvas
-
-- **Overall shape:** each `node` must be a compact rounded rectangle.
-- **Row 1 (tags):** above the title row, add a row listing the tags the `node` has.
-- **Row 2 (title):** a strong title sits at the top — bold, slightly larger than the rest.
-- **Remaining rows (properties):** under the title row, add one row per `property` the `node` has, showing the property name and its `property value`.
-
-### Edges (Connectors)
-
-- **Source anchor**
-  - Location: right edge of a `property row`, where the `property value` is a `node reference`.
-  - Internal name: `source node` / `source property row`.
-- **Target anchor**
-  - Location: left edge of the title row of the `target node` — the entity the `source property row`'s value points to.
-- **Direction:** `source property row` → `target node`'s title row.
-- **Self-reference:** if a `source property row`'s `node reference` points back to its own parent `node`, draw a **loop edge** (source and target anchor on the same `node`). Never suppress this.
-- **Visibility — no scope limit:** every `property row` whose value is a `node reference` must produce a visible `edge`, regardless of whether the `target node` is currently loaded in the visible canvas area. If out of scope, fetch and render the `target node` (see Relationship Discovery) so the edge has a real endpoint. Never drop or defer an edge due to scope.
-- **Reference resolution:** resolve via `:db/id` (entity lookup, e.g. `getBlock(entityId)`). This works identically whether the target is a page or a block — no branching needed at this step.
-- **Label resolution (separate step — DOES branch):** once the target entity is resolved, its display label is read differently depending on `:block/type`:
-  - Page → `:block/name` or `:block/original-name`
-  - Block → `:block/title`
-  - This branch is unavoidable and must not be skipped or defaulted to one path — a likely source of failures in multi-hop chains if a page and a block appear at different hops.
-- **Cardinality:** if a single `property` holds multiple `node reference`s, emit one `edge` per reference, all sharing the same source anchor and fanning out to different target anchors.
-- **Filter rule:** only draw edges from `property row`s whose value resolves to an entity ref; skip rows holding a plain string/number.
-
-### Relationship Discovery
-
-- **Scope:** the whole Logseq DB graph — no depth limit, no visible-viewport limit.
-- **Rule (applies uniformly at every hop, not just the first two):** if a `node reference` exists as the `property value` of *any* `node` currently in the graph — whether that `node` is currently acting as a `source node` or a `target node` — independently fetch the `node reference`'s full data (tags, properties, etc.) from Logseq's API and render it as an individual `target node`.
-  - This rule is depth-agnostic. It applies identically to the original root, a 1-hop target, a 2-hop target, or any node discovered afterward. There is no special case for the first or second hop — see Traversal Mechanism for how this runs without hardcoding depth.
-- Continue applying the rule until every reachable `node` has been scanned and has no unfetched `node reference`s remaining among its properties.
-
-### Traversal Mechanism
-> *How the Relationship Discovery rule must actually run. This is the single source of truth for depth — do not hardcode a fixed number of hops anywhere else in the implementation.*
-
-Maintain three in-memory structures (never write to a file):
-
-1. `visited` — set of every `node`'s `:db/id` already fetched/expanded. This is the **cycle guard**: if `node A`'s `property value` is a `node reference` back to `node B`, and `node B` already references `node A`, `visited` prevents infinite re-fetching.
-2. `queue` — `node reference`s discovered but not yet fetched/expanded.
-3. `nodes` / `edges` — the accumulating graph data to render.
-
-Order of operations:
-
-1. Add newly discovered `node reference` to `queue` (do not fetch yet).
-2. Pull the next item off `queue`; if its `:db/id` is already in `visited`, skip it entirely — already expanded. (This is what stops the loop from running forever on a cycle, including the self-reference / loop-edge case.)
-3. Otherwise, fetch its full data via `getBlock(:db/id)`, add it to `nodes`, and mark it in `visited`.
-4. Scan the newly-fetched `node`'s own properties for further `node reference`s; add any found to `queue` and record the corresponding `edge`. Per the Visibility — No Scope Limit rule, this edge is recorded and rendered immediately, even before its target is fetched.
-5. Repeat from step 2 until `queue` is empty.
-
-**Termination:** the loop ends when `queue` is empty — every discovered `node reference`, at any depth, has been fetched and scanned. This is what "continue the loop" in Relationship Discovery concretely means, and it replaces any hardcoded "check the source node, then check the target node" special-casing.
-
+- ### Inside the Canvas: Edges
+	- #### Edge Anchors
+		- **Source Anchor**
+			- **Location**: right edge of a property row, where the property row's value is a **`node` reference** (an entity ref of a `page` or `block`, both stored as `:db/id` pointers)
+			- **Internal Name:** call this the `source node` and `source property row`
+			- Cardinality: if a single `property` holds multiple `node references`, emit one edge per reference — all sharing the same source anchor, fanning out to different target anchors
+		- **Target Anchor**
+			- **Location:** left edge of the title row belonging to the **referenced `node`** (the entity that the `source property row`'s value points to)
+			- **Internal Name:** call this the `target node`
+	- #### Edge Directions
+		- edge runs from the `source property row` → to the `target node`'s title row
+		- **Self-Reference:** if a `source property row`'s `node reference` points back to its own parent `node`, draw a **loop edge** (source and target anchor both on the same `node`). Do not suppress or omit this edge.
+	- #### Edge Label
+		- display the source property name at the middle of the edge.
+	- #### Edge Visibility
+		- every `property row` whose value is a `node reference` must produce a **visible edge**, regardless of whether the `target node` is currently loaded/rendered in the visible canvas area.
+		- If the `target node` is out of scope, fetch and render it (see `Relationship Discovery`) so the edge always has a real endpoint.
+		- Never drop or defer an edge due to scope.
+	- #### Edge Processing Filter
+		- DRAW: only draw `edge`s from `property` rows whose `property value` resolves to an `node reference`
+		- DON'T DRAW: skip rows holding a plain string/number
+  - 
+- ### Relationship Discovery & Traversal: Overview
+	- #### Scope
+		- the whole Logseq DB Graph
+		- no depth limit
+		- no visible-viewport limit
+	- #### General Pattern
+		- IF a `node reference` exists as the `property value` of any `node` currently in the graph (whether that `node` is acting as a `source node` or a `target node` relative to some other edge)
+		- THEN
+			- Independently fetch the `node reference`'s full data (tags, properties, etc.) from Logseq's API.
+			- Render the `node reference` as an individual `target node`.
+		- Continue applying the rule until every reachable `node` has been scanned and has no unfetched `node reference`s remaining among its properties.
+	- #### General Rules
+		- applies uniformly at every hop, not just the first two
+		- this rule is depth-agnostic: it applies identically whether the `node` being scanned is the original root, a 1-hop target, a 2-hop target, or any node discovered afterward. There is no special case for the first or second hop see `Relationship Discovery & Traversal: Algorithm` for how this is executed without hardcoding depth.
+		- see `Relationship Discovery & Traversal: Algorithm` for how this is executed without hardcoding depth.
+-
+- ### Relationship Discovery & Traversal: Algorithm 
+  > how the rule above must actually run — this is the single source of truth for depth; do not hardcode a fixed number of hops anywhere else in the implementation  
+  
+  > This is what "continue the loop" in `Relationship Discovery` concretely means, and it is what replaces any hardcoded "check the source node, then check the target node" special-casing.  
+	- #### In-Memory Structures
+	  Maintain three in-memory structures:  
+		- `visited`
+			- set of every `node`'s `:db/id` already fetched/expanded
+			- (this is the **cycle guard**: if `node A`'s `property value` is a `node reference` back to `node B`, and `node B` already references `node A`, `visited` prevents infinite re-fetching)
+		- `queue`
+			- `node reference`s discovered but not yet fetched/expanded
+		- `nodes` / `edges`
+			- the accumulating graph data to render
+	- #### Seeding the Traversal
+		- Before the loop starts, `nodes`/`visited` are pre-populated with the entry-point `block`(s) — NOT via `queue`, since these are already fetched, not discovered.
+		- Detection: try `logseq.Editor.getCurrentBlock()` first — if it returns a block (i.e. a block is currently open/zoomed-in), seed with that. Otherwise, fall back to `logseq.Editor.getCurrentPageBlocksTree()` — seed with the current page's blocks.
+		- Immediately scan each seed block's properties for `node reference`s (same logic as step 4 below) to populate `queue` for the first time.
+		- Once seeded, the loop below runs unmodified — no special-casing for the seed step vs. any later hop.
+	- #### Order of Operations
+	  > **Note on numbering:** the bullet below ("add to queue") is the general enqueue action, not its own loop iteration — it already runs once during `Seeding the Traversal`, and it runs again inside step 4 on every iteration. **The repeating loop body is steps 2–4 only**, per "Repeat from step 2" below.  
+		- Add newly discovered `node reference` to `queue` (do not fetch yet)
+		- Pull the next item off `queue`; if its `:db/id` is already in `visited`, skip it entirely (already expanded — this is what stops the loop from running forever on a cycle, including the self-reference / loop-edge case)
+		- Otherwise, fetch its full data via `getBlock(:db/id)`, add it to `nodes`, and mark it in `visited`
+		- Scan the newly-fetched `node`'s own properties for further `node reference`s; add any found to `queue` and record the corresponding `edge` (per the `Scope` rule under `Relationship Discovery`, this edge is recorded and rendered immediately, even before its target is fetched)
+		- Repeat from step 2 until `queue` is empty
+	- #### Termination
+		- the loop ends when `queue` is empty; meaning every discovered `node reference`, at any depth, has been fetched, scanned.
 ---
 ## After code changes
 
