@@ -12,6 +12,13 @@ Ran `/production-readiness` after the dock-mode rework. Baseline clean: 64 tests
 
 ## Completed (unreleased)
 
+### Removed: Dead BackgroundIndexer / ERD-v2 code (2026-05-16)
+Unused legacy BackgroundIndexer and ERD-v2 code was deleted to clean up the codebase.
+- [x] Deleted `src/indexer.ts` and `src/indexer.test.ts` entirely.
+- [x] Removed BackgroundIndexer imports, initialization, and subscription from `src/index.ts`.
+- [x] Kept tree reloading and success toast in the `"oc-refresh"` button handler (updated toast message to "OutlineCanvas: view refreshed").
+- [x] Confirmed via grep that the background indexer was never wired to any active rendering views.
+
 ### Feature: dockWidth setting + drag handle (2026-05-16)
 Users couldn't trade canvas width for sidebar room. Added a live drag handle and a persisted vw value.
 - [x] New `dockWidth` setting (vw, default 40, clamped 20–70) drives both the iframe width and the host `margin-right`

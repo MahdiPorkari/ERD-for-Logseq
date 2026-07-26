@@ -3,7 +3,6 @@ import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./t
 import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
 import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandOutOfScopeRefs, expandDatabaseWide } from "./adapter";
 import type { LogseqBlock } from "./adapter";
-import { globalIndexer } from "./indexer";
 import { buildEdgeElements, buildEdgeLabels } from "./views/edges";
 import { buildBadges, buildFocusHalo } from "./views/badges";
 import { render, hitTest } from "./renderer";
@@ -513,9 +512,8 @@ function setupCanvas(): void {
       case "oc-export": exportCurrentView(); break;
       case "oc-copy": copyCurrentView(); break;
       case "oc-refresh": {
-        await globalIndexer.initialize();
         await loadTree();
-        logseq.UI.showMsg("OutlineCanvas: view and index refreshed", "success");
+        logseq.UI.showMsg("OutlineCanvas: view refreshed", "success");
         break;
       }
     }
@@ -598,11 +596,6 @@ async function main(): Promise<void> {
   // Settings
   await registerSettings();
   activeView = getSettings().defaultView;
-
-  // Initialize and subscribe BackgroundIndexer
-  await globalIndexer.initialize();
-  const offIndexer = globalIndexer.subscribeToChanges();
-  offHooks.push(offIndexer);
 
   // Detect initial theme
   try {
