@@ -1,10 +1,62 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, expandOutOfScopeRefs } from "./adapter";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, expandOutOfScopeRefs, resolveEntityTitle } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
 const UUID_B = "22222222-2222-2222-2222-222222222222";
+
+describe("resolveEntityTitle", () => {
+  it("resolves page-shaped entity with original-name", () => {
+    const page: any = {
+      ":block/name": "test-page",
+      ":block/original-name": "Test Page Original",
+    };
+    expect(resolveEntityTitle(page)).toBe("Test Page Original");
+  });
+
+  it("resolves page-shaped entity with block/name and block/original-name", () => {
+    const page: any = {
+      "block/name": "test-page",
+      "block/original-name": "Test Page Original Non-Colon",
+    };
+    expect(resolveEntityTitle(page)).toBe("Test Page Original Non-Colon");
+  });
+
+  it("resolves page-shaped entity when only name/originalName is present", () => {
+    const page: any = {
+      ":block/name": "test-page",
+    };
+    expect(resolveEntityTitle(page)).toBe("test-page");
+  });
+
+  it("resolves block-shaped entity with :block/title", () => {
+    const block: any = {
+      ":block/title": "Block Title Colon",
+      title: "Block Title Normal",
+      content: "Block Content",
+    };
+    expect(resolveEntityTitle(block)).toBe("Block Title Colon");
+  });
+
+  it("resolves block-shaped entity falling back to title and content", () => {
+    const block: any = {
+      title: "Block Title Fallback",
+      content: "Block Content Fallback",
+    };
+    expect(resolveEntityTitle(block)).toBe("Block Title Fallback");
+
+    const block2: any = {
+      content: "Block Content Only",
+    };
+    expect(resolveEntityTitle(block2)).toBe("Block Content Only");
+  });
+
+  it("returns empty string if nothing is found", () => {
+    const empty: any = {};
+    expect(resolveEntityTitle(empty)).toBe("");
+  });
+});
 
 describe("resolveNodeRefs", () => {
   it("returns text unchanged when there are no refs", async () => {

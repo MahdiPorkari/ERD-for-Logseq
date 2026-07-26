@@ -22,6 +22,21 @@ export type RefFetcher = (uuid: string) => Promise<string | null>;
 export interface TagProvider { getTags(blockUuid: string): Promise<readonly TagInfo[]>; }
 export type IdResolver = (id: number) => Promise<string | null>;
 
+export function resolveEntityTitle(entity: LogseqBlock): string {
+  if (!entity) return "";
+  const isPage = (entity[":block/name"] !== undefined && entity[":block/name"] !== null) ||
+                 (entity["block/name"] !== undefined && entity["block/name"] !== null);
+  if (isPage) {
+    const originalName = entity[":block/original-name"] ?? entity["block/original-name"] ?? entity["originalName"];
+    const nameVal = entity[":block/name"] ?? entity["block/name"] ?? entity["name"];
+    const titleVal = (originalName !== undefined && originalName !== null) ? originalName : nameVal;
+    return typeof titleVal === "string" ? titleVal : (titleVal != null ? String(titleVal) : "");
+  } else {
+    const titleVal = entity[":block/title"] ?? entity["block/title"] ?? entity.title ?? entity.content;
+    return typeof titleVal === "string" ? titleVal : (titleVal != null ? String(titleVal) : "");
+  }
+}
+
 let nextId = 0;
 
 const defaultIdResolver: IdResolver = async (id) => {
@@ -355,7 +370,7 @@ async function convertBlock(
   tagProvider: TagProvider,
   additionalRelKeys: string[] = []
 ): Promise<TreeNode | null> {
-  const rawText = block.content ?? block.title ?? (block as any)[":block/title"] ?? "";
+  const rawText = resolveEntityTitle(block);
   const resolved = await resolveNodeRefs(rawText, fetcher, cache);
   const name = stripMarkdown(resolved);
   if (!name && (!block.children || block.children.length === 0) && !showEmpty) return null;
@@ -559,7 +574,7 @@ export async function expandOutOfScopeRefs(
           try {
             const targetBlock = await blockFetcher(ref.targetUuid);
             if (targetBlock) {
-              const rawText = targetBlock.content ?? targetBlock.title ?? (targetBlock as any)[":block/title"] ?? "";
+              const rawText = resolveEntityTitle(targetBlock);
               const resolved = await resolveNodeRefs(rawText, fetcher, cache);
               const name = stripMarkdown(resolved) || "(empty)";
               const tags = await tagProvider.getTags(targetBlock.uuid);
@@ -868,7 +883,7 @@ export async function expandDatabaseWide(
         try {
           const targetBlock = await blockFetcher(ref.targetUuid);
           if (targetBlock) {
-            const rawText = targetBlock.content ?? targetBlock.title ?? (targetBlock as any)[":block/title"] ?? "";
+            const rawText = resolveEntityTitle(targetBlock);
             const resolved = await resolveNodeRefs(rawText, fetcher, cache);
             const name = stripMarkdown(resolved) || "(empty)";
             const tags = await tagProvider.getTags(targetBlock.uuid);

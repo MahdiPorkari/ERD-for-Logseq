@@ -23,5 +23,5 @@ To solve this, when an "Additional Relationship" points to a block outside the c
 - **No Multi-Hop**: Recursive expansion is not supported. Injected nodes do not expand their own relationships or children.
 
 ## Key Changes
-- **`src/adapter.ts`**: Add an exported `expandOutOfScopeRefs` function to clone the tree and inject external target blocks as synthetic leaf nodes.
+- **`src/adapter.ts`**: Add an exported `expandOutOfScopeRefs` function to clone the tree and inject external target blocks as synthetic leaf nodes. Added a target-title resolution mechanism that branches on page vs. block via the new `resolveEntityTitle` helper.
 - **`src/index.ts`**: Wire `expandOutOfScopeRefs` into `rebuildLayout()` for the ERD view, making `rebuildLayout` and its call sites asynchronous.
