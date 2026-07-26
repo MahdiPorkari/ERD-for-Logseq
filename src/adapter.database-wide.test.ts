@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi } from "vitest";
-import { expandDatabaseWide, expandOutOfScopeRefs, flattenDeep } from "./adapter";
+import { expandDatabaseWide, expandOutOfScopeRefs, flattenDeep, expandRelationships } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -979,5 +979,241 @@ describe("Database-wide Discovery Tests", () => {
     expect(nodeA.children[0].uuid).toBe(UUID_B);
 
     vi.unstubAllGlobals();
+  });
+
+  describe("expandRelationships (Unified Traversal)", () => {
+    it("multi-hop discovery: recursively follows A->B->C->D 3 hops deep", async () => {
+      const root: TreeNode = {
+        name: "Root",
+        depth: 0,
+        id: 0,
+        uuid: "root-uuid",
+        children: [
+          {
+            name: "Block A",
+            depth: 1,
+            id: 1,
+            uuid: UUID_A,
+            children: [],
+            refs: [
+              { kind: "rel_custom", targetUuid: UUID_B }
+            ]
+          }
+        ],
+        refs: []
+      };
+
+      const blockFetcher = vi.fn(async (uuid: string) => {
+        if (uuid === UUID_B) {
+          return {
+            uuid: UUID_B,
+            content: "Block B",
+            "user.property/rel_custom": UUID_C
+          };
+        }
+        if (uuid === UUID_C) {
+          return {
+            uuid: UUID_C,
+            content: "Block C",
+            "user.property/rel_custom": UUID_D
+          };
+        }
+        if (uuid === UUID_D) {
+          return {
+            uuid: UUID_D,
+            content: "Block D"
+          };
+        }
+        return null;
+      });
+
+      const result = await expandRelationships(
+        root,
+        fetcher,
+        idResolver,
+        tagProvider,
+        blockFetcher,
+        ["rel_custom"]
+      );
+
+      const nodeA = result.children[0];
+      expect(nodeA.children).toHaveLength(1);
+
+      const nodeB = nodeA.children[0];
+      expect(nodeB.uuid).toBe(UUID_B);
+      expect(nodeB.children).toHaveLength(1);
+
+      const nodeC = nodeB.children[0];
+      expect(nodeC.uuid).toBe(UUID_C);
+      expect(nodeC.children).toHaveLength(1);
+
+      const nodeD = nodeC.children[0];
+      expect(nodeD.uuid).toBe(UUID_D);
+      expect(nodeD.children).toHaveLength(0);
+
+      // Verify refs are cleared on resolved nodes
+      expect(nodeA.refs).toHaveLength(0);
+      expect(nodeB.refs).toHaveLength(0);
+      expect(nodeC.refs).toHaveLength(0);
+    });
+
+    it("cycle safety: handles 2-node mutual cycle and self-references cleanly", async () => {
+      const root: TreeNode = {
+        name: "Root",
+        depth: 0,
+        id: 0,
+        uuid: "root-uuid",
+        children: [
+          {
+            name: "Block A",
+            depth: 1,
+            id: 1,
+            uuid: UUID_A,
+            children: [],
+            refs: [
+              { kind: "rel_custom", targetUuid: UUID_B },
+              { kind: "rel_custom", targetUuid: UUID_A } // self-ref on root child
+            ]
+          }
+        ],
+        refs: []
+      };
+
+      const blockFetcher = vi.fn(async (uuid: string) => {
+        if (uuid === UUID_B) {
+          return {
+            uuid: UUID_B,
+            content: "Block B",
+            "user.property/rel_custom": [UUID_A, UUID_B] // mutual ref and self-ref on synthetic node
+          };
+        }
+        return null;
+      });
+
+      const result = await expandRelationships(
+        root,
+        fetcher,
+        idResolver,
+        tagProvider,
+        blockFetcher,
+        ["rel_custom"]
+      );
+
+      const nodeA = result.children[0];
+      expect(nodeA.children).toHaveLength(1);
+      const nodeB = nodeA.children[0];
+      expect(nodeB.uuid).toBe(UUID_B);
+      expect(nodeB.children).toHaveLength(0);
+
+      // Verify that already-visited/self-refs are retained in the refs array for connector drawing!
+      expect(nodeA.refs).toHaveLength(1);
+      expect(nodeA.refs![0].targetUuid).toBe(UUID_A);
+
+      expect(nodeB.refs).toHaveLength(2);
+      expect(nodeB.refs!.map(r => r.targetUuid)).toContain(UUID_A);
+      expect(nodeB.refs!.map(r => r.targetUuid)).toContain(UUID_B);
+    });
+
+    it("array-nested references: detects reference shapes in array values at hop 1 and hop 3+", async () => {
+      vi.stubGlobal("logseq", {
+        DB: {
+          datascriptQuery: vi.fn().mockResolvedValue([
+            [
+              {
+                ":db/ident": "assignee",
+                ":logseq.property/schema": {
+                  ":type": "node"
+                }
+              }
+            ]
+          ])
+        }
+      });
+
+      const root: TreeNode = {
+        name: "Root",
+        depth: 0,
+        id: 0,
+        uuid: "root-uuid",
+        children: [
+          {
+            name: "Block A",
+            depth: 1,
+            id: 1,
+            uuid: UUID_A,
+            children: [],
+            refs: []
+          }
+        ],
+        refs: []
+      };
+
+      const blockFetcher = vi.fn(async (uuid: string) => {
+        if (uuid === UUID_A) {
+          // Hop 1: array containing plain UUID and object shape
+          return {
+            uuid: UUID_A,
+            ":user.property/assignee": [UUID_B, { "block/uuid": UUID_C }]
+          };
+        }
+        if (uuid === UUID_B) {
+          return {
+            uuid: UUID_B,
+            content: "Block B"
+          };
+        }
+        if (uuid === UUID_C) {
+          // Hop 2: points to D
+          return {
+            uuid: UUID_C,
+            content: "Block C",
+            ":user.property/assignee": UUID_D
+          };
+        }
+        if (uuid === UUID_D) {
+          // Hop 3: array containing object shape with id
+          return {
+            uuid: UUID_D,
+            content: "Block D",
+            ":user.property/assignee": [{ "db/id": 42 }]
+          };
+        }
+        if (uuid === UUID_E) {
+          return {
+            uuid: UUID_E,
+            content: "Block E"
+          };
+        }
+        return null;
+      });
+
+      const mockIdResolver = vi.fn(async (id: number) => {
+        if (id === 42) return UUID_E;
+        return null;
+      });
+
+      const result = await expandRelationships(
+        root,
+        fetcher,
+        mockIdResolver,
+        tagProvider,
+        blockFetcher,
+        []
+      );
+
+      const nodeA = result.children[0];
+      expect(nodeA.children).toHaveLength(2); // discovered B and C
+
+      const nodeC = nodeA.children.find(c => c.uuid === UUID_C)!;
+      expect(nodeC.children).toHaveLength(1); // discovered D
+
+      const nodeD = nodeC.children[0];
+      expect(nodeD.uuid).toBe(UUID_D);
+      expect(nodeD.children).toHaveLength(1); // discovered E via nested array id shape at hop 3+!
+
+      expect(nodeD.children[0].uuid).toBe(UUID_E);
+
+      vi.unstubAllGlobals();
+    });
   });
 });

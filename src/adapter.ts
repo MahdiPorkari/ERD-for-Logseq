@@ -918,3 +918,128 @@ export async function expandDatabaseWide(
 
   return cloned;
 }
+
+export async function expandRelationships(
+  root: TreeNode,
+  fetcher: RefFetcher,
+  idResolver: IdResolver,
+  tagProvider: TagProvider,
+  blockFetcher: (uuid: string) => Promise<LogseqBlock | null>,
+  additionalRelKeys: string[] = [],
+  options: DatabaseWideDiscoveryOptions = {}
+): Promise<TreeNode> {
+  const cloned = structuredClone(root);
+  const cache = new Map<string, string>();
+  const idCache = new Map<number, string | null>();
+  let localNextId = 1000000 + Math.floor(Math.random() * 1000000);
+
+  // Fetch and cache node-type properties for the duration of this call
+  const nodeTypeProps = await getNodeTypePropertyNames();
+  // Ensure core properties are always included
+  nodeTypeProps.add("relates_to");
+  nodeTypeProps.add("depends_on");
+  // Ensure passed additional relationship properties are also included
+  for (const key of additionalRelKeys) {
+    nodeTypeProps.add(normalizePropertyName(key));
+  }
+
+  const visited = new Set<string>();
+  function collectUuids(node: TreeNode) {
+    if (node.uuid) {
+      visited.add(node.uuid);
+    }
+    for (const child of node.children) {
+      collectUuids(child);
+    }
+  }
+  collectUuids(cloned);
+
+  const limit = options.maxNodes ?? 500;
+  let addedNodesCount = 0;
+  let loggedWarning = false;
+
+  const queue: TreeNode[] = [];
+  function enqueueExisting(node: TreeNode) {
+    queue.push(node);
+    for (const child of node.children) {
+      enqueueExisting(child);
+    }
+  }
+  enqueueExisting(cloned);
+
+  while (queue.length > 0) {
+    const parent = queue.shift()!;
+
+    const block = await blockFetcher(parent.uuid);
+    let allRefs: NodeRef[] = [];
+    if (block) {
+      allRefs = await extractAllRefsGenerically(block, idCache, idResolver, nodeTypeProps);
+    } else {
+      allRefs = parent.refs || [];
+    }
+    if (allRefs.length === 0) {
+      parent.refs = [];
+      continue;
+    }
+
+    const keepRefs: NodeRef[] = [];
+    const seenTargetsForThisNode = new Set<string>();
+
+    for (const ref of allRefs) {
+      if (seenTargetsForThisNode.has(ref.targetUuid)) {
+        continue;
+      }
+      seenTargetsForThisNode.add(ref.targetUuid);
+
+      const hasBeenVisited = visited.has(ref.targetUuid);
+
+      if (!hasBeenVisited) {
+        if (addedNodesCount >= limit) {
+          if (!loggedWarning) {
+            console.warn("[OutlineCanvas] Database-wide Discovery stopped at maxNodes=" + limit);
+            loggedWarning = true;
+          }
+          continue;
+        }
+
+        visited.add(ref.targetUuid);
+
+        try {
+          const targetBlock = await blockFetcher(ref.targetUuid);
+          if (targetBlock) {
+            const rawText = resolveEntityTitle(targetBlock);
+            const resolved = await resolveNodeRefs(rawText, fetcher, cache);
+            const name = stripMarkdown(resolved) || "(empty)";
+            const tags = await tagProvider.getTags(targetBlock.uuid);
+            const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
+            const childRefs = await extractAllRefsGenerically(targetBlock, idCache, idResolver, nodeTypeProps);
+
+            const syntheticNode: TreeNode = {
+              name,
+              children: [],
+              depth: parent.depth + 1,
+              id: localNextId++,
+              uuid: targetBlock.uuid,
+              properties,
+              tags: [...tags],
+              refs: childRefs
+            };
+
+            parent.children.push(syntheticNode);
+            addedNodesCount++;
+            queue.push(syntheticNode);
+          }
+        } catch (err) {
+          console.error("expandRelationships: failed to fetch block", ref.targetUuid, err);
+        }
+      } else {
+        // Already visited - keep the reference for drawing overlay edges!
+        keepRefs.push(ref);
+      }
+    }
+
+    parent.refs = keepRefs;
+  }
+
+  return cloned;
+}
