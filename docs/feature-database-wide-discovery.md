@@ -1,5 +1,8 @@
 # Feature: Database-wide Discovery (Recursive Multi-Hop External References)
 
+> **STATUS: SUPERSEDED** by [Unified ERD Traversal](./feature-erd-unified-traversal.md)
+> The opt-in `databaseWideDiscovery` setting is retired, making recursive relationship traversal always-on.
+
 ## Problem Statement
 The single-hop external relationship reference feature (`expandOutOfScopeRefs`) resolved cross-page references in the Entity Relationship Diagram (ERD) view, but only for a single hop. It also explicitly excluded core relationship properties like `relates_to` and `depends_on`. For complex graphs and schemas, users need to recursively traverse these relationships across the entire graph to visualize complete, multi-hop relationship structures.
 

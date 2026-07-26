@@ -1,5 +1,8 @@
 # Feature: ERD Out-of-Scope References (Single-Hop External References)
 
+> **STATUS: SUPERSEDED** by [Unified ERD Traversal](./feature-erd-unified-traversal.md)
+> Retires the single-hop traversal approach in favor of an always-on recursive discovery mechanism.
+
 ## Problem Statement
 In the Entity Relationship Diagram (ERD) view, blocks can define relationships to other blocks in the graph using "Additional Relationship" properties (e.g., custom properties that point to another block's UUID). If the referenced target block exists outside the current parent-child page subtree being rendered, it is omitted from the diagram. Currently, the `filterIntraTreeRefs` pipeline trims any references pointing to blocks that are not already nodes in the rendered subtree. This prevents users from visualizing cross-database relationships in the ERD.
 

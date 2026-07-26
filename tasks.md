@@ -220,6 +220,16 @@ Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties 
 
 ## In Progress
 
+### Feature: Unified ERD traversal (target v1.2.0)
+- [ ] TDD Checklist for `expandRelationships`:
+  - [ ] queue-based BFS with no depth cap traversing multiple hops (A -> B -> C -> D)
+  - [ ] per-element array ref detection at every hop (not just the first hop)
+  - [ ] self-reference on a block produces a loop edge, not a dropped edge (retains self-ref in `refs`)
+  - [ ] already-visited target node keeps the edge as a reference rather than re-fetching (visited check preserves `NodeRef`)
+  - [ ] safely terminates and logs warning when hitting the `maxNodes` budget (e.g. 500)
+  - [ ] works with default properties (`relates_to` and `depends_on`) out-of-the-box
+  - [ ] correctly ignores internal and system properties (e.g., `:block/tags`, `:user.property/tags`)
+
 ### Fix: Database-wide Property Schema Discovery (target v1.2.0)
 Replace failing `getAllProperties()`/`getProperty()` type-guessing implementation with a direct Datascript query `[:find (pull ?p [:db/ident :block/title :logseq.property/schema]) :where [?p :block/type "property"]]` for reliable node relationship property discovery.
 - [x] Primary query path implemented using `logseq.DB.datascriptQuery`.
