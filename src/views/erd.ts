@@ -18,7 +18,8 @@ export function nodeSize(n: TreeNode): {
   headerH: number;
   tagsValue: string;
   tagAreaH: number;
-  propRows: { name: string; value: string; h: number }[]
+  tagLines: string[];
+  propRows: { name: string; value: string; h: number; lines: string[] }[]
 } {
   const isRoot = n.depth === 0;
   const fontSize = isRoot ? 16 : 12;
@@ -30,25 +31,30 @@ export function nodeSize(n: TreeNode): {
     ? n.tags.map(t => t.title).join(", ")
     : "N/A";
 
-  const tagRowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
+  const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
+  const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+
+  const tagLines = wrapText(tagsValue, valueSpace, PROP_FONT_SIZE, 400);
+  const tagRowH = tagLines.length * PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
   const tagAreaH = tagRowH + DIVIDER_MARGIN_Y * 2;
 
   const headerH = measureBoxHeight(n.name, w, fontSize, fontWeight, isRoot ? 60 : 36);
 
-  const propRows: { name: string; value: string; h: number }[] = [];
+  const propRows: { name: string; value: string; h: number; lines: string[] }[] = [];
   let totalPropH = 0;
 
   if (n.properties && n.properties.length > 0) {
-    const rowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
     for (const prop of n.properties) {
-      propRows.push({ name: prop.name, value: prop.value, h: rowH });
+      const propLines = wrapText(prop.value, valueSpace, PROP_FONT_SIZE, 400);
+      const rowH = propLines.length * PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
+      propRows.push({ name: prop.name, value: prop.value, h: rowH, lines: propLines });
       totalPropH += rowH;
     }
   }
 
   const h = tagAreaH + headerH + (propRows.length > 0 ? (DIVIDER_MARGIN_Y * 2 + totalPropH) : 0);
 
-  return { w, h, headerH, tagsValue, tagAreaH, propRows };
+  return { w, h, headerH, tagsValue, tagAreaH, tagLines, propRows };
 }
 
 /** Draws the ERD node structure (box, tag row, divider, title, properties, dividers) */
@@ -60,10 +66,11 @@ export function drawERDNode(
   h: number,
   headerH: number,
   tagsValue: string,
-  propRows: { name: string; value: string; h: number }[],
+  propRows: { name: string; value: string; h: number; lines?: string[] }[],
   isRoot: boolean,
   isLeaf: boolean,
-  parentColorIndex: number
+  parentColorIndex: number,
+  tagLines?: string[]
 ): RenderElement[] {
   const els: RenderElement[] = [];
   const cy = y + h / 2;
@@ -89,23 +96,29 @@ export function drawERDNode(
   const headerTextColor = isRoot ? ROOT_TEXT() : (isLeaf ? LEAF_TEXT() : c.text);
 
   // Tags row at the top
-  const tagRowH = PROP_FONT_SIZE * LINE_HEIGHT + PROP_PADDING_Y * 2;
-  const tagCenterY = y + tagRowH / 2;
+  const lineH = PROP_FONT_SIZE * LINE_HEIGHT;
+  let actualTagLines = tagLines;
+  if (!actualTagLines) {
+    const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
+    const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+    actualTagLines = wrapText(tagsValue, valueSpace, PROP_FONT_SIZE, 400);
+  }
+  const tagRowH = actualTagLines.length * lineH + PROP_PADDING_Y * 2;
+  const firstLineCenterY = y + PROP_PADDING_Y + lineH / 2;
 
   els.push({
-    type: "text", text: "Tags:", x: x + TEXT_PAD_X, y: tagCenterY,
+    type: "text", text: "Tags:", x: x + TEXT_PAD_X, y: firstLineCenterY,
     color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
     align: "left", baseline: "middle",
   });
 
-  const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
-  const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
-  const truncatedTags = truncateWithEllipsis(tagsValue, valueSpace, PROP_FONT_SIZE, 400);
-
-  els.push({
-    type: "text", text: truncatedTags, x: x + w - TEXT_PAD_X, y: tagCenterY,
-    color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
-    align: "right", baseline: "middle",
+  actualTagLines.forEach((line, i) => {
+    const centerY = y + PROP_PADDING_Y + i * lineH + lineH / 2;
+    els.push({
+      type: "text", text: line, x: x + w - TEXT_PAD_X, y: centerY,
+      color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
+      align: "right", baseline: "middle",
+    });
   });
 
   const tagDividerY = y + tagRowH + DIVIDER_MARGIN_Y;
@@ -150,7 +163,7 @@ export function drawERDNode(
     propRows.forEach((row, i) => {
       const rowTop = propY;
       const rowBottom = propY + row.h;
-      const centerY = rowTop + row.h / 2;
+      const labelY = rowTop + PROP_PADDING_Y + lineH / 2;
 
       if (i % 2 === 1 && theme().tableStripe) {
          els.push({
@@ -160,18 +173,25 @@ export function drawERDNode(
       }
 
       els.push({
-        type: "text", text: `${row.name}:`, x: x + TEXT_PAD_X, y: centerY,
+        type: "text", text: `${row.name}:`, x: x + TEXT_PAD_X, y: labelY,
         color: headerTextColor, size: PROP_FONT_SIZE, weight: 700,
         align: "left", baseline: "middle",
       });
 
-      const valueSpaceLocal = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
-      const truncatedValue = truncateWithEllipsis(row.value, valueSpaceLocal, PROP_FONT_SIZE, 400);
+      let actualLines = row.lines;
+      if (!actualLines) {
+        const nameWidthLimit = (w - TEXT_PAD_X * 2) * 0.4;
+        const valueSpace = w - TEXT_PAD_X * 2 - nameWidthLimit - NAME_GAP;
+        actualLines = wrapText(row.value, valueSpace, PROP_FONT_SIZE, 400);
+      }
 
-      els.push({
-        type: "text", text: truncatedValue, x: x + w - TEXT_PAD_X, y: centerY,
-        color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
-        align: "right", baseline: "middle",
+      actualLines.forEach((line, j) => {
+        const centerY = rowTop + PROP_PADDING_Y + j * lineH + lineH / 2;
+        els.push({
+          type: "text", text: line, x: x + w - TEXT_PAD_X, y: centerY,
+          color: theme().muted || "#666", size: PROP_FONT_SIZE, weight: 400,
+          align: "right", baseline: "middle",
+        });
       });
 
       els.push({
@@ -207,7 +227,7 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
     yStart: number,
     parentColorIndex: number
   ): { cy: number; height: number } {
-    const { w, h, headerH, tagsValue, tagAreaH, propRows } = nodeSize(node);
+    const { w, h, headerH, tagsValue, tagAreaH, tagLines, propRows } = nodeSize(node);
     const totalH = subtreeHeight(node);
     const cy = yStart + totalH / 2;
     const boxY = cy - h / 2;
@@ -228,7 +248,8 @@ export function layoutERD(root: TreeNode, _maxDepth: number): LayoutResult {
       propRows,
       isRoot,
       isLeaf,
-      colorIdx
+      colorIdx,
+      tagLines
     );
     els.push(...nodeEls);
 

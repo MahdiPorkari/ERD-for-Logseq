@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect } from "vitest";
-import { layoutERD } from "./erd";
+import { layoutERD, nodeSize } from "./erd";
 import type { TreeNode, TagInfo } from "../types";
 
 describe("layoutERD updated layout with Tags row", () => {
@@ -50,5 +50,43 @@ describe("layoutERD updated layout with Tags row", () => {
     const lines = result.elements.filter(e => e.type === "line");
     // 1 tag divider + 1 header/prop divider + 2 prop dividers = 4
     expect(lines.length).toBe(4);
+  });
+
+  it("wraps long property values and grows the box height", () => {
+    const shortNode = node("Header", [], [{ name: "Prop", value: "Short" }]);
+    const longNode = node("Header", [], [{ name: "Prop", value: "This is an extremely long property value that should definitely wrap into multiple lines on the ERD canvas" }]);
+
+    const shortSize = nodeSize(shortNode);
+    const longSize = nodeSize(longNode);
+
+    expect(longSize.h).toBeGreaterThan(shortSize.h);
+
+    const layoutResult = layoutERD(longNode, 5);
+    // Since it wraps, the element array should contain the multiple lines of text
+    const valLines = layoutResult.elements.filter(e => e.type === "text" && ((e as any).text.includes("canvas") || (e as any).text.includes("extremely") || (e as any).text.includes("definitely")));
+    expect(valLines.length).toBeGreaterThan(1);
+  });
+
+  it("renders short property values as a single line", () => {
+    const shortNode = node("Header", [], [{ name: "Prop", value: "Short" }]);
+    const layoutResult = layoutERD(shortNode, 5);
+
+    const valText = layoutResult.elements.filter(e => e.type === "text" && (e as any).text === "Short");
+    expect(valText).toHaveLength(1);
+  });
+
+  it("wraps long tag list and grows the box height", () => {
+    const shortNode = node("Header", [{ uuid: "1", title: "tag1" }]);
+    const longNode = node("Header", [
+      { uuid: "1", title: "extremely-long-tag-name-first" },
+      { uuid: "2", title: "extremely-long-tag-name-second" },
+      { uuid: "3", title: "extremely-long-tag-name-third" },
+      { uuid: "4", title: "extremely-long-tag-name-fourth" }
+    ]);
+
+    const shortSize = nodeSize(shortNode);
+    const longSize = nodeSize(longNode);
+
+    expect(longSize.h).toBeGreaterThan(shortSize.h);
   });
 });
