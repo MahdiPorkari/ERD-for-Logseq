@@ -247,16 +247,22 @@ async function extractRefUuids(
 }
 
 
-function matchAdditionalRelKey(key: string, selected: string[]): string | null {
+function matchAdditionalRelKey(key: string, selected: string[], fromPropertiesObj = false): string | null {
   if (selected.length === 0) return null;
   const map = new Map<string, string>();
   for (const s of selected) {
     const norm = s.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
     map.set(norm, s);
   }
+  let rawName: string;
   const m = USER_PROP_RE.exec(key);
-  if (!m) return null;
-  let rawName = m[1];
+  if (m) {
+    rawName = m[1];
+  } else if (fromPropertiesObj && !key.startsWith(":") && !key.includes("/")) {
+    rawName = key;
+  } else {
+    return null;
+  }
   const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
   if (suffixMatch) rawName = suffixMatch[1];
   const normKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
@@ -271,13 +277,20 @@ async function extractRefs(
 ): Promise<{ kind: RelKind; targetUuid: string }[]> {
   const out: { kind: RelKind; targetUuid: string }[] = [];
   const seen = new Set<string>();
-  const addFrom = async (key: string, value: unknown): Promise<void> => {
-    const m = REL_KEY_RE.exec(key);
+  const addFrom = async (key: string, value: unknown, fromPropertiesObj = false): Promise<void> => {
     let kind: RelKind | null = null;
+    const m = REL_KEY_RE.exec(key);
     if (m) {
       kind = m[1] as RelKind;
+    } else if (fromPropertiesObj && !key.startsWith(":") && !key.includes("/")) {
+      const normalizedKey = key.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
+      if (normalizedKey === "relates_to" || normalizedKey === "depends_on") {
+        kind = normalizedKey as RelKind;
+      } else {
+        kind = matchAdditionalRelKey(key, additionalRelKeys, true) as RelKind;
+      }
     } else {
-      kind = matchAdditionalRelKey(key, additionalRelKeys);
+      kind = matchAdditionalRelKey(key, additionalRelKeys) as RelKind;
     }
     if (!kind) return;
     const uuids = await extractRefUuids(value, idCache, idResolver, key);
@@ -291,7 +304,7 @@ async function extractRefs(
   };
   for (const [key, value] of Object.entries(block)) await addFrom(key, value);
   if (block.properties) {
-    for (const [key, value] of Object.entries(block.properties)) await addFrom(key, value);
+    for (const [key, value] of Object.entries(block.properties)) await addFrom(key, value, true);
   }
   return out;
 }
@@ -331,10 +344,16 @@ export async function extractDisplayProperties(
   fetcher: RefFetcher
 ): Promise<{ name: string; value: string }[]> {
   const propsMap = new Map<string, { rawName: string; value: unknown }>();
-  const processEntry = (key: string, value: unknown) => {
+  const processEntry = (key: string, value: unknown, fromPropertiesObj = false) => {
+    let rawName: string;
     const m = USER_PROP_RE.exec(key);
-    if (!m) return;
-    let rawName = m[1];
+    if (m) {
+      rawName = m[1];
+    } else if (fromPropertiesObj && !key.startsWith(":") && !key.includes("/")) {
+      rawName = key;
+    } else {
+      return;
+    }
     const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
     if (suffixMatch) rawName = suffixMatch[1];
     const normalizedKey = rawName.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
@@ -343,7 +362,7 @@ export async function extractDisplayProperties(
   };
   for (const [key, value] of Object.entries(block)) processEntry(key, value);
   if (block.properties) {
-    for (const [key, value] of Object.entries(block.properties)) processEntry(key, value);
+    for (const [key, value] of Object.entries(block.properties)) processEntry(key, value, true);
   }
   const out = await Promise.all(
     Array.from(propsMap.values()).map(async ({ rawName, value }) => {
@@ -677,11 +696,17 @@ async function extractAllRefsGenerically(
   const out: { kind: string; targetUuid: string }[] = [];
   const seen = new Set<string>();
 
-  const processKeyVal = async (key: string, value: unknown) => {
+  const processKeyVal = async (key: string, value: unknown, fromPropertiesObj = false) => {
+    let rawName: string;
     const m = USER_PROP_RE.exec(key);
-    if (!m) return;
+    if (m) {
+      rawName = m[1];
+    } else if (fromPropertiesObj && !key.startsWith(":") && !key.includes("/")) {
+      rawName = key;
+    } else {
+      return;
+    }
 
-    let rawName = m[1];
     const suffixMatch = rawName.match(/^(.+)-[a-zA-Z0-9]+$/);
     if (suffixMatch) rawName = suffixMatch[1];
 
@@ -707,7 +732,7 @@ async function extractAllRefsGenerically(
   }
   if (block.properties) {
     for (const [key, value] of Object.entries(block.properties)) {
-      await processKeyVal(key, value);
+      await processKeyVal(key, value, true);
     }
   }
 

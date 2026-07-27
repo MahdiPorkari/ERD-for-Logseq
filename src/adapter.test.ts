@@ -237,6 +237,30 @@ describe("extractDisplayProperties", () => {
     expect(props[0].name).toBe("Custom");
     expect(props[0].value).toBe("value");
   });
+
+  it("extracts simple user properties from block.properties while ignoring system and namespaced properties", async () => {
+    const block: LogseqBlock = {
+      uuid: "b1",
+      properties: {
+        "status": "In Progress",
+        "priority": "A",
+        ":internal-key": "ignore-me",
+        "some.namespaced/key": "ignore-me",
+        "relates_to": "r1", // should be excluded
+        "tags": "t1" // should be excluded
+      }
+    };
+    const fetcher = vi.fn();
+    const idResolver = vi.fn();
+    const idCache = new Map();
+    const props = await extractDisplayProperties(block, idCache, idResolver, fetcher);
+
+    expect(props).toHaveLength(2);
+    expect(props[0].name).toBe("Priority");
+    expect(props[0].value).toBe("A");
+    expect(props[1].name).toBe("Status");
+    expect(props[1].value).toBe("In Progress");
+  });
 });
 
 describe("DefaultTagProvider edge cases", () => {

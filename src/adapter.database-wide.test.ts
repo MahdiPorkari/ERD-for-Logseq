@@ -1170,5 +1170,65 @@ describe("Database-wide Discovery Tests", () => {
 
       vi.unstubAllGlobals();
     });
+
+    it("extracts simple relationship properties (e.g. relates_to, depends_on, or custom properties) from block.properties during traversal", async () => {
+      const root: TreeNode = {
+        name: "Root",
+        depth: 0,
+        id: 0,
+        uuid: "root-uuid",
+        children: [
+          {
+            name: "Block A",
+            depth: 1,
+            id: 1,
+            uuid: UUID_A,
+            children: [],
+            refs: []
+          }
+        ],
+        refs: []
+      };
+
+      const blockFetcher = vi.fn(async (uuid: string) => {
+        if (uuid === UUID_A) {
+          return {
+            uuid: UUID_A,
+            properties: {
+              "depends_on": UUID_B,
+              "custom_rel": UUID_C
+            }
+          };
+        }
+        if (uuid === UUID_B) {
+          return {
+            uuid: UUID_B,
+            content: "Block B"
+          };
+        }
+        if (uuid === UUID_C) {
+          return {
+            uuid: UUID_C,
+            content: "Block C"
+          };
+        }
+        return null;
+      });
+
+      const result = await expandRelationships(
+        root,
+        fetcher,
+        idResolver,
+        tagProvider,
+        blockFetcher,
+        ["custom_rel"]
+      );
+
+      const nodeA = result.children[0];
+      expect(nodeA.children).toHaveLength(2);
+      const childUuids = nodeA.children.map(c => c.uuid);
+      expect(childUuids).toContain(UUID_B);
+      expect(childUuids).toContain(UUID_C);
+    });
   });
 });
