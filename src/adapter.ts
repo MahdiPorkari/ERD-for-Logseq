@@ -37,6 +37,39 @@ export function resolveEntityTitle(entity: LogseqBlock): string {
   }
 }
 
+export async function fetchPropertiesReliably(uuid: string, isPage: boolean): Promise<Record<string, any> | null> {
+  if (typeof logseq === "undefined" || !logseq.Editor) return null;
+  try {
+    if (!isPage) {
+      if (logseq.Editor.getBlockProperties) {
+        return await logseq.Editor.getBlockProperties(uuid);
+      }
+    } else {
+      if (logseq.Editor.getPageProperties) {
+        let props = await logseq.Editor.getPageProperties(uuid);
+        if (props && Object.keys(props).length > 0) {
+          return props;
+        }
+        if (logseq.Editor.getPage) {
+          const page = await logseq.Editor.getPage(uuid);
+          if (page) {
+            const pageName = (page as any).originalName ?? (page as any).name;
+            if (pageName && pageName !== uuid) {
+              props = await logseq.Editor.getPageProperties(pageName);
+              if (props && Object.keys(props).length > 0) {
+                return props;
+              }
+            }
+          }
+        }
+      }
+    }
+  } catch (err) {
+    console.error("fetchPropertiesReliably failed", uuid, isPage, err);
+  }
+  return null;
+}
+
 let nextId = 0;
 
 const defaultIdResolver: IdResolver = async (id) => {
@@ -831,8 +864,26 @@ export async function expandRelationships(
             const resolved = await resolveNodeRefs(rawText, fetcher, cache);
             const name = stripMarkdown(resolved) || "(empty)";
             const tags = await tagProvider.getTags(targetBlock.uuid);
-            const properties = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
-            const childRefs = await extractAllRefsGenerically(targetBlock, idCache, idResolver, nodeTypeProps);
+
+            const isPage = (targetBlock[":block/name"] !== undefined && targetBlock[":block/name"] !== null) ||
+                           (targetBlock["block/name"] !== undefined && targetBlock["block/name"] !== null);
+
+            const rawScan = await extractDisplayProperties(targetBlock, idCache, idResolver, fetcher);
+            const fetchedPropsObj = await fetchPropertiesReliably(targetBlock.uuid, isPage);
+
+            const mergedBlock = {
+              ...targetBlock,
+              properties: {
+                ...targetBlock.properties,
+                ...fetchedPropsObj
+              }
+            };
+
+            const properties = await extractDisplayProperties(mergedBlock, idCache, idResolver, fetcher);
+
+            console.log("[DEBUG properties]", targetBlock.uuid, isPage, "raw scan:", rawScan, "dedicated API:", properties);
+
+            const childRefs = await extractAllRefsGenerically(mergedBlock, idCache, idResolver, nodeTypeProps);
 
             const syntheticNode: TreeNode = {
               name,

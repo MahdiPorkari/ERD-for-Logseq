@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, resolveEntityTitle } from "./adapter";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, resolveEntityTitle, fetchPropertiesReliably } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -381,3 +381,58 @@ describe("filterRefsByKind", () => {
   });
 });
 
+describe("fetchPropertiesReliably", () => {
+  it("calls getBlockProperties when isPage is false", async () => {
+    const getBlockProperties = vi.fn().mockResolvedValue({ status: "done" });
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getBlockProperties,
+      }
+    });
+
+    const result = await fetchPropertiesReliably("block-uuid", false);
+    expect(getBlockProperties).toHaveBeenCalledWith("block-uuid");
+    expect(result).toEqual({ status: "done" });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("calls getPageProperties when isPage is true", async () => {
+    const getPageProperties = vi.fn().mockResolvedValue({ type: "item" });
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getPageProperties,
+      }
+    });
+
+    const result = await fetchPropertiesReliably("page-uuid", true);
+    expect(getPageProperties).toHaveBeenCalledWith("page-uuid");
+    expect(result).toEqual({ type: "item" });
+
+    vi.unstubAllGlobals();
+  });
+
+  it("falls back to resolving the page name via getPage and retries if pageProperties returns null or empty", async () => {
+    const getPageProperties = vi.fn()
+      .mockResolvedValueOnce(null)
+      .mockResolvedValueOnce({ type: "item-retry" });
+
+    const getPage = vi.fn().mockResolvedValue({ originalName: "Some Page" });
+
+    vi.stubGlobal("logseq", {
+      Editor: {
+        getPageProperties,
+        getPage,
+      }
+    });
+
+    const result = await fetchPropertiesReliably("page-uuid-missing", true);
+    expect(getPageProperties).toHaveBeenCalledTimes(2);
+    expect(getPageProperties).toHaveBeenNthCalledWith(1, "page-uuid-missing");
+    expect(getPage).toHaveBeenCalledWith("page-uuid-missing");
+    expect(getPageProperties).toHaveBeenNthCalledWith(2, "Some Page");
+    expect(result).toEqual({ type: "item-retry" });
+
+    vi.unstubAllGlobals();
+  });
+});
