@@ -161,7 +161,6 @@ export function buildEdgeElements(
   rectsByUuid: Map<string, Rect>,
   focusedUuid?: string | null
 ): RenderElement[] {
-  if (focusedUuid === null) return [];
   const els: RenderElement[] = [];
 
   (function walk(node: TreeNode): void {
@@ -169,9 +168,6 @@ export function buildEdgeElements(
       const source = rectsByUuid.get(node.uuid);
       if (source) {
         for (const ref of node.refs) {
-          if (focusedUuid !== undefined && node.uuid !== focusedUuid && ref.targetUuid !== focusedUuid) {
-            continue;
-          }
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
 
@@ -196,7 +192,6 @@ export function buildEdgeLabels(
   rectsByUuid: Map<string, Rect>,
   focusedUuid?: string | null
 ): RenderElement[] {
-  if (focusedUuid === null) return [];
   const els: RenderElement[] = [];
   const t_ = theme();
 
@@ -205,9 +200,6 @@ export function buildEdgeLabels(
       const source = rectsByUuid.get(node.uuid);
       if (source) {
         for (const ref of node.refs) {
-          if (focusedUuid !== undefined && node.uuid !== focusedUuid && ref.targetUuid !== focusedUuid) {
-            continue;
-          }
           const target = rectsByUuid.get(ref.targetUuid);
           if (!target) continue;
 
