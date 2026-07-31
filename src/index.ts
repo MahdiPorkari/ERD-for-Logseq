@@ -1,6 +1,6 @@
 import "@logseq/libs";
 import type { ViewId, ViewDef, RenderElement, TreeNode, LayoutResult } from "./types";
-import { registerSettings, getSettings, getSelectedAdditionalRelationshipProperties, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
+import { registerSettings, getSettings, DOCK_WIDTH_MIN, DOCK_WIDTH_MAX } from "./settings";
 import { fetchTree, fetchBlockTree, flattenDeep, buildTree, filterIntraTreeRefs, filterRefsByKind, DefaultTagProvider, expandRelationships } from "./adapter";
 import type { LogseqBlock } from "./adapter";
 import { globalIndexer } from "./indexer";
@@ -127,26 +127,20 @@ function composeElements(): void {
   }
   const settings = getSettings();
   const rects = currentLayout.nodeRectsByUuid;
-  const additionalSelected = getSelectedAdditionalRelationshipProperties();
-  const allowedKinds = new Set<string>();
 
-  if (activeView === "erd2" || activeView === "graph") {
-    allowedKinds.add("reference");
-    allowedKinds.add("tag");
-    allowedKinds.add("property");
-    allowedKinds.add("parent-child");
-  } else {
-    if (settings.showRelationships) {
-      allowedKinds.add("relates_to");
-      allowedKinds.add("depends_on");
-    }
-    if (activeView === "erd" && settings.showRelationships) {
-      for (const name of additionalSelected) allowedKinds.add(name);
-    }
-  }
+  const hasRelationships = activeView === "erd"
+    ? settings.showRelationships
+    : (activeView === "erd2" || activeView === "graph" ? true : settings.showRelationships);
 
-  const wantOverlay = allowedKinds.size > 0 && !!rects;
-  const overlayTree = wantOverlay ? filterRefsByKind(currentDisplayTree, allowedKinds as Set<any>) : currentDisplayTree;
+  const wantOverlay = hasRelationships && !!rects;
+  const overlayTree = wantOverlay ? (
+    activeView === "erd2" || activeView === "graph"
+      ? filterRefsByKind(currentDisplayTree, new Set(["reference", "tag", "property", "parent-child"]))
+      : (activeView === "erd"
+          ? currentDisplayTree
+          : filterRefsByKind(currentDisplayTree, new Set(["relates_to", "depends_on"]))
+        )
+  ) : currentDisplayTree;
 
   const overlay = wantOverlay
     ? buildEdgeElements(overlayTree, rects!, focusedUuid)
@@ -215,15 +209,16 @@ async function rebuildLayout(): Promise<void> {
 
   let tree: TreeNode;
   if (activeView === "erd" && settings.showRelationships) {
+    const pruned = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
     const expanded = await expandRelationships(
-      currentTree,
+      pruned,
       defaultFetcher,
       defaultIdResolver,
       tagProvider,
       blockFetcher,
-      getSelectedAdditionalRelationshipProperties()
+      []
     );
-    tree = flattenDeep(expanded, settings.maxDepth, settings.depthMode);
+    tree = expanded;
   } else {
     tree = flattenDeep(currentTree, settings.maxDepth, settings.depthMode);
   }
@@ -325,8 +320,8 @@ async function loadTree(blockUuid?: string): Promise<void> {
   }
 
   currentTree = blockUuid
-    ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, getSelectedAdditionalRelationshipProperties())
-    : await fetchTree(settings.showEmptyBlocks, getSelectedAdditionalRelationshipProperties());
+    ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, [])
+    : await fetchTree(settings.showEmptyBlocks, []);
 
   // New tree → previous focus may not exist anymore.
   focusedUuid = null;

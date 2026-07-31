@@ -1,6 +1,6 @@
 /** @vitest-environment jsdom */
-import { describe, it, expect, vi, beforeEach } from "vitest";
-import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, resolveEntityTitle, fetchPropertiesReliably } from "./adapter";
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { resolveNodeRefs, buildTree, DefaultTagProvider, LogseqBlock, extractDisplayProperties, filterRefsByKind, resolveEntityTitle, fetchPropertiesReliably, expandRelationships, flattenDeep } from "./adapter";
 import { TreeNode } from "./types";
 
 const UUID_A = "11111111-1111-1111-1111-111111111111";
@@ -434,5 +434,395 @@ describe("fetchPropertiesReliably", () => {
     expect(result).toEqual({ type: "item-retry" });
 
     vi.unstubAllGlobals();
+  });
+});
+
+
+describe("Unlimited Relationship Depth & Automatic Discovery (v1.2.0)", () => {
+  const UUID_A = "11111111-1111-1111-1111-111111111111";
+  const UUID_B = "22222222-2222-2222-2222-222222222222";
+  const UUID_C = "33333333-3333-3333-3333-333333333333";
+  const UUID_D = "44444444-4444-4444-4444-444444444444";
+  const UUID_ROOT = "99999999-9999-9999-9999-999999999999";
+
+  beforeEach(() => {
+    vi.stubGlobal("logseq", {
+      DB: {
+        datascriptQuery: vi.fn().mockResolvedValue([])
+      },
+      Editor: {
+        getBlock: vi.fn().mockResolvedValue(null)
+      }
+    });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("survives 3-hop relationship chain (A->B->C->D) under default maxDepth=3", async () => {
+    const root: TreeNode = {
+      name: "A",
+      uuid: UUID_A,
+      depth: 0,
+      id: 1,
+      children: [],
+      properties: [],
+      tags: [],
+      refs: [{ kind: "depends_on", targetUuid: UUID_B }]
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_A, { uuid: UUID_A, content: "A", "user.property/depends_on": UUID_B }],
+      [UUID_B, { uuid: UUID_B, content: "B", "user.property/depends_on": UUID_C }],
+      [UUID_C, { uuid: UUID_C, content: "C", "user.property/depends_on": UUID_D }],
+      [UUID_D, { uuid: UUID_D, content: "D" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    expect(expanded.uuid).toBe(UUID_A);
+    expect(expanded.children).toHaveLength(1);
+
+    const nodeB = expanded.children[0];
+    expect(nodeB.uuid).toBe(UUID_B);
+    expect(nodeB.children).toHaveLength(1);
+
+    const nodeC = nodeB.children[0];
+    expect(nodeC.uuid).toBe(UUID_C);
+    expect(nodeC.children).toHaveLength(1);
+
+    const nodeD = nodeC.children[0];
+    expect(nodeD.uuid).toBe(UUID_D);
+  });
+
+  it("rediscovers outline-pruned node via relationship reference", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      uuid: UUID_ROOT,
+      depth: 0,
+      id: 1,
+      children: [
+        {
+          name: "A",
+          uuid: UUID_A,
+          depth: 1,
+          id: 2,
+          children: [
+            {
+              name: "B",
+              uuid: UUID_B,
+              depth: 2,
+              id: 3,
+              children: [],
+              properties: [],
+              tags: [],
+              refs: []
+            }
+          ],
+          properties: [],
+          tags: [],
+          refs: []
+        }
+      ],
+      properties: [],
+      tags: [],
+      refs: [{ kind: "relates_to", targetUuid: UUID_B }]
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_ROOT, { uuid: UUID_ROOT, content: "Root", "user.property/relates_to": UUID_B }],
+      [UUID_A, { uuid: UUID_A, content: "A" }],
+      [UUID_B, { uuid: UUID_B, content: "B" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 2, "recursive");
+    expect(pruned.children[0].children).toHaveLength(0);
+
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    expect(expanded.children).toHaveLength(2);
+    const foundB = expanded.children.find(n => n.uuid === UUID_B);
+    expect(foundB).toBeDefined();
+    expect(foundB!.name).toBe("B");
+  });
+
+  it("handles diamond relationship correctly producing exactly one synthetic node", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      uuid: UUID_ROOT,
+      depth: 0,
+      id: 1,
+      children: [
+        {
+          name: "A",
+          uuid: UUID_A,
+          depth: 1,
+          id: 2,
+          children: [],
+          properties: [],
+          tags: [],
+          refs: [{ kind: "depends_on", targetUuid: UUID_C }]
+        },
+        {
+          name: "B",
+          uuid: UUID_B,
+          depth: 1,
+          id: 3,
+          children: [],
+          properties: [],
+          tags: [],
+          refs: [{ kind: "depends_on", targetUuid: UUID_C }]
+        }
+      ],
+      properties: [],
+      tags: [],
+      refs: []
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_ROOT, { uuid: UUID_ROOT, content: "Root" }],
+      [UUID_A, { uuid: UUID_A, content: "A", "user.property/depends_on": UUID_C }],
+      [UUID_B, { uuid: UUID_B, content: "B", "user.property/depends_on": UUID_C }],
+      [UUID_C, { uuid: UUID_C, content: "C" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    let totalNodes = 0;
+    const collect = (n: TreeNode) => {
+      totalNodes++;
+      for (const c of n.children) collect(c);
+    };
+    collect(expanded);
+    expect(totalNodes).toBe(4);
+
+    const nodeA = expanded.children[0];
+    const nodeB = expanded.children[1];
+    expect(nodeA.children.length + nodeB.children.length).toBe(1);
+  });
+
+  it("self-reference loop edge survives without infinite recursion", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      uuid: UUID_ROOT,
+      depth: 0,
+      id: 1,
+      children: [],
+      properties: [],
+      tags: [],
+      refs: [{ kind: "relates_to", targetUuid: UUID_ROOT }]
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_ROOT, { uuid: UUID_ROOT, content: "Root", "user.property/relates_to": UUID_ROOT }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    expect(expanded.children).toHaveLength(0);
+    expect(expanded.refs).toBeDefined();
+  });
+
+  it("relationship source block at maxDepth boundary (depth 2 with maxDepth: 3) still fully expands", async () => {
+    const root: TreeNode = {
+      name: "Root",
+      uuid: UUID_ROOT,
+      depth: 0,
+      id: 1,
+      children: [
+        {
+          name: "A",
+          uuid: UUID_A,
+          depth: 1,
+          id: 2,
+          children: [
+            {
+              name: "B",
+              uuid: UUID_B,
+              depth: 2,
+              id: 3,
+              children: [],
+              properties: [],
+              tags: [],
+              refs: [{ kind: "depends_on", targetUuid: UUID_C }]
+            }
+          ],
+          properties: [],
+          tags: [],
+          refs: []
+        }
+      ],
+      properties: [],
+      tags: [],
+      refs: []
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_ROOT, { uuid: UUID_ROOT, content: "Root" }],
+      [UUID_A, { uuid: UUID_A, content: "A" }],
+      [UUID_B, { uuid: UUID_B, content: "B", "user.property/depends_on": UUID_C }],
+      [UUID_C, { uuid: UUID_C, content: "C" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    const nodeA = expanded.children[0];
+    const nodeB = nodeA.children[0];
+    expect(nodeB.uuid).toBe(UUID_B);
+    expect(nodeB.children).toHaveLength(1);
+    expect(nodeB.children[0].uuid).toBe(UUID_C);
+  });
+
+  it("handles cardinality-many multiple references producing one edge per reference", async () => {
+    const root: TreeNode = {
+      name: "A",
+      uuid: UUID_A,
+      depth: 0,
+      id: 1,
+      children: [],
+      properties: [],
+      tags: [],
+      refs: [
+        { kind: "depends_on", targetUuid: UUID_B },
+        { kind: "depends_on", targetUuid: UUID_C }
+      ]
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_A, { uuid: UUID_A, content: "A", "user.property/depends_on": [UUID_B, UUID_C] }],
+      [UUID_B, { uuid: UUID_B, content: "B" }],
+      [UUID_C, { uuid: UUID_C, content: "C" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    expect(expanded.children).toHaveLength(2);
+    expect(expanded.children.map(n => n.uuid)).toContain(UUID_B);
+    expect(expanded.children.map(n => n.uuid)).toContain(UUID_C);
+  });
+
+  it("regression: page with showRelationships on and zero node-typed properties renders identically", async () => {
+    const root: TreeNode = {
+      name: "A",
+      uuid: UUID_A,
+      depth: 0,
+      id: 1,
+      children: [
+        {
+          name: "B",
+          uuid: UUID_B,
+          depth: 1,
+          id: 2,
+          children: [],
+          properties: [],
+          tags: [],
+          refs: []
+        }
+      ],
+      properties: [],
+      tags: [],
+      refs: []
+    };
+
+    const blockMap = new Map<string, any>([
+      [UUID_A, { uuid: UUID_A, content: "A" }],
+      [UUID_B, { uuid: UUID_B, content: "B" }],
+    ]);
+
+    const fetcher = async (uuid: string) => blockMap.get(uuid)?.content || null;
+    const blockFetcher = async (uuid: string) => blockMap.get(uuid) || null;
+    const idResolver = async (id: number) => null;
+    const tagProvider = new DefaultTagProvider();
+
+    const pruned = flattenDeep(root, 3, "recursive");
+    const expanded = await expandRelationships(
+      pruned,
+      fetcher,
+      idResolver,
+      tagProvider,
+      blockFetcher,
+      []
+    );
+
+    expect(expanded.children).toHaveLength(1);
+    expect(expanded.children[0].uuid).toBe(UUID_B);
   });
 });

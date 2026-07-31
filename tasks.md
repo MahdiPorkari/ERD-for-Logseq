@@ -231,6 +231,21 @@ Cross-hierarchy edges between blocks via `relates_to` / `depends_on` properties 
 
 ## In Progress
 
+### Feature: Unlimited Relationship Depth & Automatic Discovery (target v1.2.0)
+Correctly separate outline nesting depth from relationship hop depth, automatically discover node-type properties, and support eager rendering of all relationship connectors.
+- [x] TDD Checklist for Unlimited Relationship Depth & Automatic Discovery:
+  - [x] Re-order rebuildLayout to prune the outline tree BEFORE calling expandRelationships and skip flattenDeep afterward
+  - [x] Remove "Additional Relationship" dynamic checkbox settings and heading from settings panel
+  - [x] Implement eager/eager-adjacent edge visibility in buildEdgeElements and buildEdgeLabels (render all edges eagerly by default)
+  - [x] Unit test: A 3-hop relationship chain (A->B->C->D) survives the outline depth pruning with default maxDepth=3 settings
+  - [x] Unit test: Outline-pruned node is successfully rediscovered via a relationship reference (Approach a justification)
+  - [x] Unit test: Diamond relationship structure (two visible blocks reference same block -> one synthetic node, two edges drawn)
+  - [x] Unit test: Self-reference loop edge survives through the full rebuildLayout flow
+  - [x] Unit test: A relationship source block at the maxDepth boundary (depth 2 with maxDepth: 3) still fully expands outward
+  - [x] Unit test: Cardinality-many: one property with multiple node references produces one edge per reference
+  - [x] Unit test: Regression: a page with showRelationships on and zero node-typed properties renders identically to pre-refactor
+  - [x] Visual verification of the ERD view layout and all connectors with default settings
+
 ### Fix: Database-wide Property Schema Discovery (target v1.2.0)
 Replace failing `getAllProperties()`/`getProperty()` type-guessing implementation with a direct Datascript query `[:find (pull ?p [:db/ident :block/title :logseq.property/schema]) :where [?p :block/type "property"]]` for reliable node relationship property discovery.
 - [x] Primary query path implemented using `logseq.DB.datascriptQuery`.

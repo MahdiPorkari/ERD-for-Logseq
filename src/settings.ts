@@ -31,74 +31,7 @@ export const DEFAULTS: PluginSettings = {
   dockWidth: 40,
 };
 
-function normalizeForExclusion(name: string): string {
-  return name.replace(/[_-]/g, " ").toLowerCase().trim().replace(/\s+/g, "_");
-}
-
-function stripNamespace(name: string): string {
-  if (name.startsWith("user.property/")) {
-    return name.slice("user.property/".length);
-  }
-  if (name.startsWith("logseq.")) {
-    return name.slice("logseq.".length);
-  }
-  return name;
-}
-
-export async function getCustomTagPropertyNames(): Promise<string[]> {
-  try {
-    if (typeof logseq === "undefined" || !logseq.Editor || !logseq.Editor.getAllProperties) {
-      return [];
-    }
-    const allProperties = await logseq.Editor.getAllProperties();
-    if (!allProperties) return [];
-
-    console.log("AdditionalRelationship: getAllProperties raw sample", allProperties.slice(0, 3));
-
-    const discovered = new Map<string, string>(); // normalized -> raw
-    const exclusions = new Set(["relates_to", "depends_on", "tags"]);
-
-    for (const entry of allProperties) {
-      if (!entry) continue;
-
-      let rawIdentifier: string | undefined;
-      let rawDisplayName: string | undefined;
-
-      if (typeof entry === "string") {
-        rawIdentifier = entry;
-      } else if (typeof entry === "object") {
-        const obj = entry as any;
-        rawIdentifier = obj.title || obj.name || obj.originalName || obj["block/title"] || obj["db/ident"];
-        if (!rawIdentifier) {
-          console.warn("AdditionalRelationship: unrecognized property entry shape, skipping", entry);
-          continue;
-        }
-      }
-
-      if (rawIdentifier) {
-        if (rawIdentifier.toLowerCase().startsWith("logseq")) {
-          continue;
-        }
-        rawDisplayName = stripNamespace(rawIdentifier);
-        const normalized = normalizeForExclusion(rawDisplayName);
-        if (exclusions.has(normalized)) {
-          continue;
-        }
-        if (!discovered.has(normalized)) {
-          discovered.set(normalized, rawDisplayName);
-        }
-      }
-    }
-
-    return Array.from(discovered.values()).sort((a, b) => a.localeCompare(b));
-  } catch (e) {
-    return [];
-  }
-}
-
 export async function registerSettings(): Promise<void> {
-  const customProps = await getCustomTagPropertyNames();
-
   const schema: any[] = [
     {
       key: "defaultView",
@@ -159,7 +92,7 @@ export async function registerSettings(): Promise<void> {
       default: DEFAULTS.showRelationships,
       title: "Show Relationship Connectors",
       description:
-        "Draw lines between blocks that reference each other via 'relates_to' or 'depends_on' node properties (Tree Chart, Right Tree, Mind Map only).",
+        "Draw lines between blocks that reference each other via any 'node' schema property (e.g. 'relates_to', 'depends_on', or custom properties).",
     },
     {
       key: "showRelationshipLabels",
@@ -167,7 +100,7 @@ export async function registerSettings(): Promise<void> {
       default: DEFAULTS.showRelationshipLabels,
       title: "Label Relationship Connectors",
       description:
-        "Display the property name ('depends_on' / 'relates_to') as a small pill at the midpoint of each connector. Useful as a visual cue at first; turn off once the line styles are familiar.",
+        "Display the property name as a small pill at the midpoint of each connector. Useful as a visual cue at first; turn off once the line styles are familiar.",
     },
     {
       key: "dockBehavior",
@@ -187,26 +120,6 @@ export async function registerSettings(): Promise<void> {
       description: `Width of the docked canvas as a percentage of the viewport (${DOCK_WIDTH_MIN}–${DOCK_WIDTH_MAX}). Drag the left edge of the canvas to adjust live; this number is the persisted value.`,
     },
   ];
-
-  if (customProps.length > 0) {
-    schema.push({
-      key: "additionalRelationshipHeading",
-      type: "heading",
-      title: "Additional Relationship",
-      description: "Select which custom tag properties to treat as additional relationships.",
-      default: null,
-    });
-
-    for (const name of customProps) {
-      schema.push({
-        key: `${RELPROP_PREFIX}${name}`,
-        type: "boolean",
-        title: name,
-        description: `Include "${name}" as an additional relationship property.`,
-        default: false,
-      });
-    }
-  }
 
   logseq.useSettingsSchema(schema);
 }
@@ -239,11 +152,4 @@ export function getSettings(): PluginSettings {
       )
     ),
   };
-}
-
-export function getSelectedAdditionalRelationshipProperties(): string[] {
-  const settings = (logseq.settings || {}) as Record<string, any>;
-  return Object.keys(settings)
-    .filter((key) => key.startsWith(RELPROP_PREFIX) && settings[key] === true)
-    .map((key) => key.slice(RELPROP_PREFIX.length));
 }
