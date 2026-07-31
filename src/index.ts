@@ -19,7 +19,6 @@ import { layoutRightTree } from "./views/right-tree";
 import { layoutFishbone } from "./views/fishbone";
 import { layoutTreemap, treemapHitBoxes } from "./views/treemap";
 import { layoutERD } from "./views/erd";
-import { layoutGraph } from "./views/graph";
 
 const VIEWS: ViewDef[] = [
   { id: "tree", label: "Tree Chart", icon: "⎅", layout: layoutTreeChart },
@@ -31,8 +30,6 @@ const VIEWS: ViewDef[] = [
   { id: "fish", label: "Fishbone", icon: "⟜", layout: layoutFishbone },
   { id: "tmap", label: "Treemap", icon: "▦", layout: layoutTreemap },
   { id: "erd", label: "ERD", icon: "⊳", layout: layoutERD },
-  { id: "erd2", label: "ERD v.2", icon: "⇿", layout: layoutERD },
-  { id: "graph", label: "Graph", icon: "🕸", layout: layoutGraph },
 ];
 
 // Plugin state
@@ -128,18 +125,13 @@ function composeElements(): void {
   const settings = getSettings();
   const rects = currentLayout.nodeRectsByUuid;
 
-  const hasRelationships = activeView === "erd"
-    ? settings.showRelationships
-    : (activeView === "erd2" || activeView === "graph" ? true : settings.showRelationships);
+  const hasRelationships = settings.showRelationships && (activeView === "erd" || activeView === "tree" || activeView === "rtree" || activeView === "mind");
 
   const wantOverlay = hasRelationships && !!rects;
   const overlayTree = wantOverlay ? (
-    activeView === "erd2" || activeView === "graph"
-      ? filterRefsByKind(currentDisplayTree, new Set(["reference", "tag", "property", "parent-child"]))
-      : (activeView === "erd"
-          ? currentDisplayTree
-          : filterRefsByKind(currentDisplayTree, new Set(["relates_to", "depends_on"]))
-        )
+    activeView === "erd"
+      ? currentDisplayTree
+      : filterRefsByKind(currentDisplayTree, new Set(["relates_to", "depends_on"]))
   ) : currentDisplayTree;
 
   const overlay = wantOverlay
@@ -169,29 +161,7 @@ async function rebuildLayout(): Promise<void> {
   if (!currentTree) return;
   const settings = getSettings();
 
-  if (activeView === "erd2" || activeView === "graph") {
-    // ERD v.2 and Graph view are pre-built, no depth flattening or expandDatabaseWide needed here
-    const view = VIEWS.find((v) => v.id === activeView)!;
-    const result = view.layout(currentTree, settings.maxDepth);
 
-    currentDisplayTree = currentTree;
-    currentLayout = result;
-    composeElements();
-
-    let refCount = 0;
-    (function count(n: TreeNode): void {
-      refCount += n.refs?.length ?? 0;
-      for (const c of n.children) count(c);
-    })(currentTree);
-    console.debug(
-      `[OutlineCanvas] view=${activeView} focus=${focusedUuid ?? "none"} refs(intra-tree)=${refCount} rects=${result.nodeRectsByUuid?.size ?? 0}`
-    );
-
-    const { w, h } = getCanvasSize();
-    controllerState.transform = fitToView(result.bounds, w, h);
-    redraw();
-    return;
-  }
 
   const defaultIdResolver = async (id: number) => {
     try {
@@ -260,64 +230,9 @@ function setFocus(uuid: string | null): void {
 async function loadTree(blockUuid?: string): Promise<void> {
   const settings = getSettings();
 
-  if (activeView === "graph") {
-    // Graph view is backed by background index (whole graph)
-    const result = await globalIndexer.buildGraphWide(defaultFetcher);
 
-    let nodes = result.nodes;
-    if (nodes.length > 500) {
-      console.warn(`[OutlineCanvas] Graph view is capped at 500 nodes. Found ${nodes.length} nodes.`);
-      if (typeof logseq !== "undefined" && logseq.UI && logseq.UI.showMsg) {
-        logseq.UI.showMsg("The whole-graph ERD exceeds 500 nodes. Showing first 500 nodes to preserve performance.", "warning");
-      }
-      nodes = nodes.slice(0, 500);
-    }
 
-    // Virtual Graph Root TreeNode
-    const root: TreeNode = {
-      name: "Virtual Graph Root",
-      children: nodes,
-      depth: 0,
-      id: 999999,
-      uuid: "virtual-graph-root",
-      properties: [],
-      tags: [],
-      refs: []
-    };
 
-    currentTree = root;
-    focusedUuid = null;
-    if (currentTree) {
-      await rebuildLayout();
-    }
-    return;
-  }
-
-  if (activeView === "erd2") {
-    // ERD v.2 is backed by background index
-    const page = await logseq.Editor.getCurrentPage();
-    if (!page) return;
-    const pageUuid = (page as any).uuid;
-    const pageName = (page as any).originalName ?? (page as any).name ?? "Untitled";
-
-    // Get all block UUIDs on the page
-    const blocks = await logseq.Editor.getPageBlocksTree(pageName);
-    const blockUuids: string[] = [];
-    const collectUuids = (blks: any[]) => {
-      for (const b of blks) {
-        if (b.uuid) blockUuids.push(b.uuid);
-        if (b.children) collectUuids(b.children);
-      }
-    };
-    if (blocks) collectUuids(blocks);
-
-    currentTree = await globalIndexer.buildERDV2Tree(pageUuid, blockUuids, pageName, defaultFetcher);
-    focusedUuid = null;
-    if (currentTree) {
-      await rebuildLayout();
-    }
-    return;
-  }
 
   currentTree = blockUuid
     ? await fetchBlockTree(blockUuid, settings.showEmptyBlocks, undefined, undefined, undefined, [])
@@ -902,7 +817,6 @@ async function main(): Promise<void> {
   // Live updates via DB.onChanged (debounced)
   const offChanged = logseq.DB.onChanged(() => {
     if (!logseq.isMainUIVisible) return;
-    if (activeView === "erd2" || activeView === "graph") return; // ERD v.2/Graph does not auto-refresh on navigation or live edits
     if (debounceTimer) clearTimeout(debounceTimer);
     debounceTimer = setTimeout(() => {
       loadTree();

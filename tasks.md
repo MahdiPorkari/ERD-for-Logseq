@@ -245,6 +245,7 @@ Correctly separate outline nesting depth from relationship hop depth, automatica
   - [x] Unit test: Cardinality-many: one property with multiple node references produces one edge per reference
   - [x] Unit test: Regression: a page with showRelationships on and zero node-typed properties renders identically to pre-refactor
   - [x] Visual verification of the ERD view layout and all connectors with default settings
+  - [x] Remove ERD v.2 ("erd2") and Graph ("graph") views cleanly without damaging other views
 
 ### Fix: Database-wide Property Schema Discovery (target v1.2.0)
 Replace failing `getAllProperties()`/`getProperty()` type-guessing implementation with a direct Datascript query `[:find (pull ?p [:db/ident :block/title :logseq.property/schema]) :where [?p :block/type "property"]]` for reliable node relationship property discovery.
